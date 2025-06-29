@@ -1,7 +1,7 @@
-import axios from "axios";
-import { env, pve_auth_header } from "@/libs/env";
-import * as PVE from "./types";
 import https from "https";
+import axios from "axios";
+import { env, pve_auth_header } from "@yuzu/libs/env";
+import * as PVE from "./types";
 
 type ExtractRequest<API> = API extends { request: infer Req } ? Req : {};
 type ExtractResponse<API> = API extends { response: infer Res } ? Res : never;
@@ -61,3 +61,7 @@ export async function pve_api<
     status: response.status,
   };
 }
+
+export const sshkey_encoded = (key: string) => encodeURIComponent(key);
+
+export const ipv4_config = (cidr: string, gateway: string): string => `ipconfig0=${cidr}&ipconfig1=${gateway}`;
