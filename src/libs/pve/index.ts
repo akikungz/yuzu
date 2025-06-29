@@ -5,26 +5,23 @@ import * as PVE from "./types";
 
 type ExtractRequest<API> = API extends { request: infer Req } ? Req : {};
 type ExtractResponse<API> = API extends { response: infer Res } ? Res : never;
+type Response<T> = Promise<{
+  data: T;
+  status: number;
+}>
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
-export async function pve_api<
-  Path extends keyof PVE.PVE_API,
-  Method extends keyof PVE.PVE_API[Path],
+export const pve_api = async <
+  Path extends keyof PVE.PVE_API, 
+  Method extends keyof PVE.PVE_API[Path], 
   Req extends ExtractRequest<PVE.PVE_API[Path][Method]>
->(
-  path: Path,
-  method: Method,
-  request: Req
-): Promise<{
-  data: ExtractResponse<PVE.PVE_API[Path][Method]>;
-  status: number;
-}> {
-  const { params = {}, body, headers } = request as Partial<{
+>(path: Path, method: Method, request: Req): Response<ExtractResponse<PVE.PVE_API[Path][Method]>> => {
+  const { params, body, headers } = request as Partial<{
     params: Record<string, string | number>;
     body: Record<string, unknown>;
     headers: Record<string, string>;
-  }>;
+  }> & ExtractRequest<PVE.PVE_API[Path][Method]>;
 
   const resolvedPath = path.replace(/:([a-zA-Z_]+)/g, (_, key) => {
     const value = params?.[key];
