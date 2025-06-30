@@ -13,11 +13,16 @@ type Response<T> = Promise<{
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 export const pve_api = async <
-  Path extends keyof PVE.PVE_API, 
-  Method extends keyof PVE.PVE_API[Path], 
-  Req extends ExtractRequest<PVE.PVE_API[Path][Method]>
->(path: Path, method: Method, request: Req): Response<ExtractResponse<PVE.PVE_API[Path][Method]>> => {
-  const { params, body, headers } = request as Partial<{
+  Path extends keyof PVE.PVE_API,
+  Method extends keyof PVE.PVE_API[Path],
+  Req extends ExtractRequest<PVE.PVE_API[Path][Method]>,
+  Res extends ExtractResponse<PVE.PVE_API[Path][Method]>
+>(
+  path: Path,
+  method: Method,
+  req: Req
+): Response<Res> => {
+  const { params, body, headers } = req as Partial<{
     params: Record<string, string | number>;
     body: Record<string, unknown>;
     headers: Record<string, string>;
@@ -43,9 +48,7 @@ export const pve_api = async <
     ? new URLSearchParams(body as Record<string, string>).toString()
     : body;
 
-  console.log(data);
-
-  const response = await axios({
+  const response = await axios<Res>({
     url,
     method: method.toString().toUpperCase(),
     headers: processHeaders,
@@ -54,11 +57,7 @@ export const pve_api = async <
   });
 
   return {
-    data: response.data as ExtractResponse<PVE.PVE_API[Path][Method]>,
+    data: response.data,
     status: response.status,
   };
 }
-
-export const sshkey_encoded = (key: string) => encodeURIComponent(key);
-
-export const ipv4_config = (cidr: string, gateway: string): string => `ipconfig0=${cidr}&ipconfig1=${gateway}`;

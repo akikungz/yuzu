@@ -1,4 +1,4 @@
-export type PVE_Node = {
+export interface PVE_Node {
   status: "online" | "offline";
   node: string;
   uptime: number;
@@ -8,7 +8,7 @@ export type PVE_Node = {
   maxmem: number;
 }
 
-export type PVE_QEMU = {
+export interface PVE_QEMU {
   vmid: number;
   name: string;
   status: "running" | "stopped" | "suspended";
@@ -20,190 +20,112 @@ export type PVE_QEMU = {
   maxdisk: number;
 }
 
-export type PVE_NodeParams = { node: string };
-export type PVE_VMParams = PVE_NodeParams & { vmid: number };
+export interface PVE_Request<Params = Record<string, never>, Headers = Record<string, never>, Body = Record<string, never>> {
+  params?: Params;
+  headers?: Headers;
+  body?: Body;
+}
+
+export interface PVE_Response<Data = Record<string, never>> {
+  data: Data;
+}
+
+export interface PVE_NodeParams {
+  node: string;
+}
+
+export interface PVE_VMParams extends PVE_NodeParams {
+  vmid: number;
+}
+
 export type PVE_EmptyResponse = Record<string, never>;
+
+export interface PVE_FullRequest<Req = PVE_Request, Res = PVE_Response> {
+  request: Req;
+  response: Res;
+}
 
 export interface PVE_API {
   "/nodes/": {
-    GET: {
-      request: {};
-      response: {
-        data: PVE_Node[];
-        status: number;
-      };
-    };
+    GET: PVE_FullRequest<
+      PVE_Request<{}, { Accept: "application/json" }>,
+      PVE_Response<PVE_Node[]>
+    >;
   };
 
   "/nodes/:node/status": {
-    GET: {
-      request: {
-        params: PVE_NodeParams;
-        headers: {
-          "Accept": "application/json";
-        }
-      };
-      response: {
-        data: PVE_Node;
-      };
-    };
+    GET: PVE_FullRequest<
+      PVE_Request<PVE_NodeParams, { Accept: "application/json" }>,
+      PVE_Response<PVE_Node>
+    >;
   };
 
   "/nodes/:node/qemu": {
-    GET: {
-      request: {
-        params: PVE_NodeParams;
-        headers?: {
-          "Accept": "application/json";
-        };
-      };
-      response: {
-        data: PVE_QEMU[];
-      };
-    };
-  };
-
-  "/nodes/:node/qemu/:vmid": {
-    GET: {
-      request: {
-        params: PVE_VMParams;
-        headers?: {
-          "Accept": "application/json";
-        };
-      };
-      response: {
-        data: PVE_QEMU;
-      };
-    };
-    DELETE: {
-      request: {
-        params: PVE_VMParams;
-        body: {
-          "destroy-unreferenced-disks"?: boolean;
-          "purge"?: boolean;
-          "skiplock"?: boolean;
-        }
-      };
-      response: PVE_EmptyResponse;
-    };
+    GET: PVE_FullRequest<
+      PVE_Request<PVE_NodeParams, { Accept?: "application/json" }>,
+      PVE_Response<PVE_QEMU[]>
+    >;
   };
 
   "/nodes/:node/qemu/:vmid/status/current": {
-    GET: {
-      request: {
-        params: VMParams;
-        headers?: {
-          "Accept": "application/json";
-        };
-      };
-      response: {
-        data: PVE_QEMU;
-      };
-    };
+    GET: PVE_FullRequest<
+      PVE_Request<PVE_VMParams, { Accept: "application/json" }>,
+      PVE_Response<PVE_QEMU>
+    >;
   };
 
   "/nodes/:node/qemu/:vmid/status/:state": {
-    POST: {
-      request: {
-        params: VMParams & {
-          state: "start" | "shutdown" | "restart" | "resume";
-        };
-        headers?: {
-          "Accept": "application/json";
-          "Content-Type": "application/x-www-form-urlencoded" | "application/json";
-        };
-      };
-      response: PVE_EmptyResponse;
-    };
+    POST: PVE_FullRequest<
+      PVE_Request<PVE_VMParams & {
+        state: "start" | "stop" | "suspend" | "resume";
+      }, { Accept: "application/json" }>,
+      PVE_Response<PVE_EmptyResponse>
+    >;
   };
 
   "/nodes/:node/qemu/:vmid/clone": {
-    POST: {
-      request: {
-        params: VMParams;
-        headers?: {
-          "Accept": "application/json";
-          "Content-Type": "application/x-www-form-urlencoded" | "application/json";
-        };
-        body: {
-          newid: number;
-          name: string;
-          target?: string;
-        };
-      };
-      response: PVE_EmptyResponse;
-    };
+    POST: PVE_FullRequest<
+      PVE_Request<PVE_VMParams, { Accept: "application/json" }, {
+        newid: number;
+        name: string;
+        target?: string;
+      }>,
+      PVE_Response<PVE_EmptyResponse>
+    >;
   };
 
   "/nodes/:node/qemu/:vmid/config": {
-    GET: {
-      request: {
-        params: VMParams;
-        headers?: {
-          "Accept": "application/json";
-          "Content-Type": "application/x-www-form-urlencoded" | "application/json";
-        };
-      };
-      response: {
-        data: Record<string, any>;
-      };
-    };
-    POST: {
-      request: {
-        params: VMParams;
-        body: {
-          // Network configuration
-          ipconfig0?: string;
-          // Cloud-init configuration
-          cicustom?: string;
-          ciuser?: string;
-          cipassword?: string;
-          sshkeys?: string;
-          // CPU and memory configuration
-          cores?: number;
-          memory?: number;
-        };
-      };
-      response: PVE_EmptyResponse;
-    };
-    PUT: {
-      request: {
-        params: VMParams;
-        headers?: {
-          "Accept": "application/json";
-          "Content-Type": "application/x-www-form-urlencoded" | "application/json";
-        };
-        body: {
-          // Network configuration
-          ipconfig0?: string;
-          // Cloud-init configuration
-          cicustom?: string;
-          ciuser?: string;
-          cipassword?: string;
-          sshkeys?: string;
-          // CPU and memory configuration
-          cores?: number;
-          memory?: number;
-        };
-      };
-      response: PVE_EmptyResponse;
-    };
+    GET: PVE_FullRequest<
+      PVE_Request<PVE_VMParams, { Accept?: "application/json" }>,
+      PVE_Response<Record<string, unknown>>
+    >;
+
+    POST: PVE_FullRequest<
+      PVE_Request<PVE_VMParams, { Accept: "application/json" }, {
+        // Network configuration
+        ipconfig0?: `ip=${string}/${number};gw=${string}`;
+        // Cloud-init configuration
+        cicustom?: string;
+        ciuser?: string;
+        cipassword?: string;
+        sshkeys?: string;
+        // CPU configuration
+        cores?: number;
+        memory?: number;
+        }>,
+      PVE_Response<PVE_EmptyResponse>
+    >;
+
+    PUT: PVE_API["/nodes/:node/qemu/:vmid/config"]["POST"];
   };
 
   "/nodes/:node/qemu/:vmid/resize": {
-    PUT: {
-      request: {
-        params: VMParams;
-        headers?: {
-          "Accept": "application/json";
-          "Content-Type": "application/x-www-form-urlencoded" | "application/json";
-        };
-        body: {
-          disk: string;
-          size: string;
-        };
-      };
-      response: PVE_EmptyResponse;
-    };
+    POST: PVE_FullRequest<
+      PVE_Request<PVE_VMParams, { Accept: "application/json" }, {
+        memory?: number;
+        cores?: number;
+      }>,
+      PVE_Response<PVE_EmptyResponse>
+    >;
   };
 }
