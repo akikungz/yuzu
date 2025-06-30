@@ -20,13 +20,17 @@ export interface PVE_QEMU {
   maxdisk: number;
 }
 
-export interface PVE_Request<Params = Record<string, never>, Headers = Record<string, never>, Body = Record<string, never>> {
+export interface PVE_Request<
+  Params extends Record<string, never> = Record<string, never>,
+  Headers extends Record<string, never> = Record<string, never>,
+  Body extends Record<string, never> = Record<string, never>
+> {
   params?: Params;
   headers?: Headers;
   body?: Body;
 }
 
-export interface PVE_Response<Data = Record<string, never>> {
+export interface PVE_Response<Data extends Record<string, never> = Record<string, never>> {
   data: Data;
 }
 
@@ -40,7 +44,10 @@ export interface PVE_VMParams extends PVE_NodeParams {
 
 export type PVE_EmptyResponse = Record<string, never>;
 
-export interface PVE_FullRequest<Req = PVE_Request, Res = PVE_Response> {
+export interface PVE_FullRequest<
+  Req extends PVE_Request = PVE_Request, 
+  Res extends PVE_Response = PVE_Response
+> {
   request: Req;
   response: Res;
 }
@@ -112,7 +119,7 @@ export interface PVE_API {
         // CPU configuration
         cores?: number;
         memory?: number;
-        }>,
+      }>,
       PVE_Response<PVE_EmptyResponse>
     >;
 
