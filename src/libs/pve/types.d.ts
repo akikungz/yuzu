@@ -110,7 +110,7 @@ export interface PVE_API {
     POST: PVE_FullRequest<
       PVE_Request<PVE_VMParams, { Accept: "application/json" }, {
         // Network configuration
-        ipconfig0?: `ip=${string}/${number};gw=${string}`;
+        ipconfig0?: `ip=${string}/${number},gw=${string}`;
         // Cloud-init configuration
         cicustom?: string;
         ciuser?: string;
