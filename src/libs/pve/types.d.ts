@@ -74,6 +74,18 @@ export interface PVE_API {
     >;
   };
 
+  "/nodes/:node/qemu/:vmid": {
+    GET: PVE_FullRequest<
+      PVE_Request<PVE_VMParams, { Accept: "application/json" }>,
+      PVE_Response<PVE_QEMU>
+    >;
+
+    DELETE: PVE_FullRequest<
+      PVE_Request<PVE_VMParams, { Accept: "application/json" }>,
+      PVE_Response<PVE_EmptyResponse>
+    >;
+  };
+
   "/nodes/:node/qemu/:vmid/status/current": {
     GET: PVE_FullRequest<
       PVE_Request<PVE_VMParams, { Accept: "application/json" }>,
@@ -92,7 +104,10 @@ export interface PVE_API {
 
   "/nodes/:node/qemu/:vmid/clone": {
     POST: PVE_FullRequest<
-      PVE_Request<PVE_VMParams, { Accept: "application/json" }, {
+      PVE_Request<PVE_VMParams, {
+        Accept: "application/json";
+        "Content-Type": "application/json";
+      }, {
         newid: number;
         name: string;
         target?: string;
