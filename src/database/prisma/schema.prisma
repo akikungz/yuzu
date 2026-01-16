@@ -1,0 +1,485 @@
+generator client {
+  provider   = "prisma-client"
+  output     = "./generated"
+  engineType = "client"
+  runtime    = "bun"
+}
+
+datasource db {
+  provider = "postgres"
+}
+
+model User {
+  id            String        @id
+  name          String
+  email         String        @unique
+  emailVerified Boolean       @default(false)
+  image         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  accounts      Account[]
+  platformUser  PlatformUser?
+  sessions      Session[]
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model PlatformUser {
+  id                       Int                       @id @default(autoincrement())
+  userId                   String                    @unique
+  role                     PlatformRole              @default(STUDENT)
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  extendedRequests         ExtendedRequest[]         @relation("Requester")
+  extendedReviews          ExtendedRequest[]         @relation("Reviewer")
+  extendedRequestAuditLogs ExtendedRequestAuditLog[]
+  instances                Instance[]
+  instanceAuditLogs        InstanceAuditLog[]
+  platformFiles            PlatformFile[]
+  platformFilePermissions  PlatformFilePermission[]
+  platformSSHKeys          PlatformSSHKey[]
+  user                     User                      @relation(fields: [userId], references: [id])
+  requestsAsRequester      Request[]                 @relation("Requester")
+  requestsAsReviewer       Request[]                 @relation("Reviewer")
+  requestAuditLogs         RequestAuditLog[]
+  courses                  Course[]                  @relation("CourseInstructors")
+
+  @@index([userId, role])
+  @@map("platform_user")
+}
+
+model InstructorSearch {
+  id             Int      @id @default(autoincrement())
+  email          String   @unique
+  havePlatformId Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("instructor_search")
+}
+
+model Course {
+  id              Int              @id @default(autoincrement())
+  code            String           @unique
+  title           String
+  description     String?
+  isActive        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  courseOfferings CourseOffering[]
+  instructors     PlatformUser[]   @relation("CourseInstructors")
+
+  @@index([code, isActive])
+  @@map("course")
+}
+
+model Semester {
+  id               Int               @id @default(autoincrement())
+  name             String
+  startDate        DateTime
+  endDate          DateTime
+  isCurrent        Boolean           @default(false)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  courseOfferings  CourseOffering[]
+  extendedRequests ExtendedRequest[]
+  instances        Instance[]
+
+  @@index([isCurrent])
+  @@map("semester")
+}
+
+model CourseOffering {
+  id         Int        @id @default(autoincrement())
+  courseId   Int
+  semesterId Int
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  course     Course     @relation(fields: [courseId], references: [id])
+  semester   Semester   @relation(fields: [semesterId], references: [id])
+  instances  Instance[]
+  requests   Request[]
+
+  @@unique([courseId, semesterId])
+  @@index([courseId, semesterId])
+  @@map("course_offering")
+}
+
+model PVENode {
+  id           Int           @id @default(autoincrement())
+  name         String        @unique
+  ipAddress    String        @unique
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  pvetemplates PVETemplate[]
+  pveVMs       PVEVM[]
+
+  @@index([name])
+  @@map("pve_node")
+}
+
+model PVENetwork {
+  id            Int            @id @default(autoincrement())
+  name          String
+  subnet        String
+  gateway       String
+  bridge        String
+  vlanTag       Int
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  pveNetworkIPs PVENetworkIP[]
+
+  @@unique([name, subnet])
+  @@map("pve_network")
+}
+
+model PVENetworkIP {
+  id           Int        @id @default(autoincrement())
+  ipAddress    String     @unique
+  isAllocated  Boolean    @default(false)
+  pveNetworkId Int
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  pveNetwork   PVENetwork @relation(fields: [pveNetworkId], references: [id], onDelete: Cascade)
+  pveVMs       PVEVM?
+
+  @@index([ipAddress, isAllocated, pveNetworkId])
+  @@map("pve_network_ip")
+}
+
+model PVETemplate {
+  id          Int        @id @default(autoincrement())
+  name        String
+  description String?
+  vmId        Int        @unique
+  type        PVEVMType
+  pveNodeId   Int
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  instances   Instance[]
+  pveNode     PVENode    @relation(fields: [pveNodeId], references: [id])
+  requests    Request[]
+
+  @@unique([name, type])
+  @@map("pve_template")
+}
+
+model PVEVM {
+  id             Int           @id @default(autoincrement())
+  vmId           Int           @unique
+  hostname       String        @unique
+  status         PVEVMStatus   @default(STOPPED)
+  type           PVEVMType     @default(QEMU)
+  pveNodeId      Int
+  pveNetworkIPId Int?          @unique
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  instances      Instance[]
+  pveNetworkIP   PVENetworkIP? @relation(fields: [pveNetworkIPId], references: [id])
+  pveNode        PVENode       @relation(fields: [pveNodeId], references: [id])
+
+  @@index([pveNodeId, status])
+  @@map("pve_vm")
+}
+
+model Instance {
+  id                     Int                     @id @default(autoincrement())
+  platformUserId         Int
+  pveVMId                Int?
+  pveTemplateId          Int
+  cpus                   Int
+  memoryMB               Int
+  diskGB                 Int
+  courseOfferingId       Int?
+  requestId              Int?                    @unique
+  status                 InstanceStatus          @default(PENDING)
+  provisionStatus        InstanceProvisionStatus @default(NOT_STARTED)
+  provisionError         String?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  semesterId             Int?
+  extendedRequests       ExtendedRequest[]
+  courseOffering         CourseOffering?         @relation(fields: [courseOfferingId], references: [id], onDelete: Restrict)
+  platformUser           PlatformUser            @relation(fields: [platformUserId], references: [id])
+  pveTemplate            PVETemplate             @relation(fields: [pveTemplateId], references: [id])
+  pveVM                  PVEVM?                  @relation(fields: [pveVMId], references: [id])
+  request                Request?                @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  semester               Semester?               @relation(fields: [semesterId], references: [id])
+  instanceAuditLogs      InstanceAuditLog[]
+  instanceReverseProxies InstanceReverseProxy[]
+
+  @@unique([platformUserId, courseOfferingId])
+  @@index([status, provisionStatus, platformUserId, pveTemplateId, semesterId])
+  @@map("instance")
+}
+
+model InstanceReverseProxy {
+  id          Int              @id @default(autoincrement())
+  targetPort  Int
+  type        ReverseProxyType @default(HTTPS)
+  description String?
+  instanceId  Int
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  instance    Instance         @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@unique([instanceId, targetPort])
+  @@map("instance_reverse_proxy")
+}
+
+model InstanceAuditLog {
+  id            Int          @id @default(autoincrement())
+  instanceId    Int
+  action        String
+  performedById Int
+  timestamp     DateTime     @default(now())
+  notes         String?
+  instance      Instance     @relation(fields: [instanceId], references: [id])
+  performedBy   PlatformUser @relation(fields: [performedById], references: [id])
+
+  @@index([instanceId, performedById])
+  @@map("instance_audit_log")
+}
+
+model Request {
+  id               Int               @id @default(autoincrement())
+  title            String
+  description      String?
+  courseOfferingId Int
+  pveTemplateId    Int
+  cpus             Int
+  memoryMB         Int
+  diskGB           Int
+  requesterId      Int
+  reviewerId       Int?
+  status           ApprovalStatus    @default(PENDING)
+  reason           String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  instance         Instance?
+  courseOffering   CourseOffering    @relation(fields: [courseOfferingId], references: [id])
+  pveTemplate      PVETemplate       @relation(fields: [pveTemplateId], references: [id])
+  requester        PlatformUser      @relation("Requester", fields: [requesterId], references: [id])
+  reviewer         PlatformUser?     @relation("Reviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
+  requestAuditLogs RequestAuditLog[]
+
+  @@unique([requesterId, courseOfferingId])
+  @@index([requesterId, status, courseOfferingId])
+  @@map("request")
+}
+
+model ExtendedRequest {
+  id                       Int                       @id @default(autoincrement())
+  title                    String
+  description              String?
+  targetInstanceId         Int
+  nextSemesterId           Int
+  requesterId              Int
+  reviewerId               Int?
+  status                   ApprovalStatus            @default(PENDING)
+  reason                   String?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  nextSemester             Semester                  @relation(fields: [nextSemesterId], references: [id])
+  requester                PlatformUser              @relation("Requester", fields: [requesterId], references: [id])
+  reviewer                 PlatformUser?             @relation("Reviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
+  targetInstance           Instance                  @relation(fields: [targetInstanceId], references: [id])
+  extendedRequestAuditLogs ExtendedRequestAuditLog[]
+
+  @@unique([requesterId, targetInstanceId, nextSemesterId])
+  @@index([requesterId, status, targetInstanceId])
+  @@map("extended_request")
+}
+
+model RequestAuditLog {
+  id            Int            @id @default(autoincrement())
+  requestId     Int
+  action        ApprovalStatus
+  performedById Int
+  timestamp     DateTime       @default(now())
+  notes         String?
+  performedBy   PlatformUser   @relation(fields: [performedById], references: [id])
+  request       Request        @relation(fields: [requestId], references: [id])
+
+  @@index([requestId])
+  @@map("request_audit_log")
+}
+
+model ExtendedRequestAuditLog {
+  id                Int             @id @default(autoincrement())
+  extendedRequestId Int
+  action            ApprovalStatus
+  performedById     Int
+  timestamp         DateTime        @default(now())
+  notes             String?
+  extendedRequest   ExtendedRequest @relation(fields: [extendedRequestId], references: [id])
+  performedBy       PlatformUser    @relation(fields: [performedById], references: [id])
+
+  @@index([extendedRequestId])
+  @@map("extended_request_audit_log")
+}
+
+model PlatformSSHKey {
+  id        Int          @id @default(autoincrement())
+  name      String
+  publicKey String
+  ownerId   Int
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  owner     PlatformUser @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, name])
+  @@unique([ownerId, publicKey])
+  @@map("platform_ssh_key")
+}
+
+model PlatformFile {
+  id                      String                   @id @default(cuid())
+  name                    String
+  type                    PlatformFileType
+  sizeBytes               Int                      @default(0)
+  visibility              PlatformFileViewerRole   @default(OWNER)
+  parentId                String?
+  platformUserId          Int
+  isPublic                Boolean                  @default(false)
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  parent                  PlatformFile?            @relation("ParentChild", fields: [parentId], references: [id], onDelete: Cascade)
+  children                PlatformFile[]           @relation("ParentChild")
+  platformUser            PlatformUser             @relation(fields: [platformUserId], references: [id], onDelete: Cascade)
+  platformFilePermissions PlatformFilePermission[]
+  platformFileVersions    PlatformFileVersion[]
+
+  @@index([platformUserId])
+  @@index([parentId])
+  @@map("platform_file")
+}
+
+model PlatformFileVersion {
+  id             Int          @id @default(autoincrement())
+  platformFileId String
+  versionNumber  Int
+  sizeBytes      Int
+  storagePath    String
+  createdAt      DateTime     @default(now())
+  platformFile   PlatformFile @relation(fields: [platformFileId], references: [id], onDelete: Cascade)
+
+  @@unique([platformFileId, versionNumber])
+  @@map("platform_file_version")
+}
+
+model PlatformFilePermission {
+  id             Int                    @id @default(autoincrement())
+  platformFileId String
+  platformUserId Int
+  permission     PlatformFileViewerRole @default(VIEWER)
+  platformFile   PlatformFile           @relation(fields: [platformFileId], references: [id], onDelete: Cascade)
+  platformUser   PlatformUser           @relation(fields: [platformUserId], references: [id], onDelete: Cascade)
+
+  @@unique([platformFileId, platformUserId])
+  @@index([platformUserId])
+  @@map("platform_file_permission")
+}
+
+enum PlatformRole {
+  ADMIN
+  INSTRUCTOR
+  STUDENT
+}
+
+enum PVEVMStatus {
+  RUNNING
+  STOPPED
+  SUSPENDED
+}
+
+enum PVEVMType {
+  QEMU
+  LXC
+}
+
+enum InstanceStatus {
+  PENDING
+  ACTIVE
+  PROMOTED
+  INACTIVE
+  DELETED
+}
+
+enum InstanceProvisionStatus {
+  NOT_STARTED
+  QUEUED
+  PROVISIONING
+  COMPLETED
+  FAILED
+}
+
+enum ReverseProxyType {
+  HTTPS
+  HTTP
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum PlatformFileType {
+  FILE
+  FOLDER
+}
+
+enum PlatformFileViewerRole {
+  VIEWER
+  EDITOR
+  OWNER
+}

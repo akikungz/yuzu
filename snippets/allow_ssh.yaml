@@ -1,0 +1,21 @@
+#cloud-config
+users:
+  - name: user
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+ssh_pwauth: True
+chpasswd:
+  expire: True
+  list: |
+    user:password
+package_reboot_if_required: true
+package_update: true
+package_upgrade: true
+packages:
+  - qemu-guest-agent
+runcmd:
+  - systemctl enable --now qemu-guest-agent
+  - sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+  - systemctl restart sshd
+  - touch /var/log/cloud-init-allow-ssh.done
+final_message: "The system is finally up, after $UPTIME seconds"
