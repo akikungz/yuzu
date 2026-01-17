@@ -14,7 +14,8 @@ export const cloneQemu = async (
   node: string,
   vmid: number,
   newVmid: number,
-  targetNode: string
+  targetNode: string,
+  hostname: string
 ) => {
   // Start the clone operation
   const cloneRes = await pveApi.POST("/api2/json/nodes/{node}/qemu/{vmid}/clone", {
@@ -25,6 +26,7 @@ export const cloneQemu = async (
       newid: newVmid,
       target: targetNode,
       full: false,
+      name: hostname,
     },
   });
 

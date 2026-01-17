@@ -220,11 +220,13 @@ export class ProvisionQueueWorker {
     const provisionLog = vmLog.child({ vmid: targetId, targetNode });
     provisionLog.info("VM resources allocated, starting clone operation");
 
+    const hostname = this.generateRandomHostname(instanceId);
+
     // Step 4: Clone VM
     const { result: cloneUpid, duration: cloneDuration } = await this.executeStep(
       "clone-vm",
       provisionLog,
-      () => qemu.cloneQemu(template.pveNode.name, template.vmId, targetId, targetNode)
+      () => qemu.cloneQemu(template.pveNode.name, template.vmId, targetId, targetNode, hostname)
     );
 
     provisionLog.debug({ upid: cloneUpid }, "Clone task initiated, waiting for completion");
@@ -266,14 +268,21 @@ export class ProvisionQueueWorker {
       network: pickedIp.pveNetwork.name
     });
 
-    // Step 6: Create PVEVM record
+    // Step 6: Create or update PVEVM record (upsert handles reprovisioning cases)
     const { result: pveVm, duration: createVmDuration } = await this.executeStep(
       "create-pvevm-record",
       ipLog,
-      () => this.prisma.pVEVM.create({
-        data: {
+      () => this.prisma.pVEVM.upsert({
+        where: { vmId: targetId },
+        create: {
           vmId: targetId,
-          hostname: this.generateRandomHostname(instanceId),
+          hostname,
+          pveNode: { connect: { name: targetNode } },
+          pveNetworkIP: { connect: { id: pickedIp.id } }
+        },
+        update: {
+          hostname,
+          status: "STOPPED",
           pveNode: { connect: { name: targetNode } },
           pveNetworkIP: { connect: { id: pickedIp.id } }
         }
