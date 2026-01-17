@@ -368,13 +368,19 @@ export class ProvisionQueueWorker {
       details: { upid: startUpid }
     });
 
-    // Step 11: Wait for QEMU Guest Agent
-    const { duration: agentDuration } = await this.executeStep(
-      "wait-guest-agent",
-      ipLog,
-      () => qemu.agentCheckQemu(targetNode, targetId)
-    );
-    steps.push({ step: "wait-guest-agent", duration: agentDuration, success: true });
+    // Step 11: Wait for QEMU Guest Agent if failed, continue anyway
+    try {
+      const { duration: agentDuration } = await this.executeStep(
+        "wait-guest-agent",
+        ipLog,
+        () => qemu.agentCheckQemu(targetNode, targetId)
+      );
+      steps.push({ step: "wait-guest-agent", duration: agentDuration, success: true });
+    } catch (err) {
+      const error = err as Error;
+      ipLog.warn({ err: { message: error.message } }, "Guest agent check failed, continuing anyway");
+      steps.push({ step: "wait-guest-agent", duration: 0, success: false, details: { error: error.message } });
+    }
 
     // Step 12: Final status update
     const { duration: finalUpdateDuration } = await this.executeStep(

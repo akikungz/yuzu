@@ -189,7 +189,7 @@ export const agentCheckQemu = (
 ): Promise<void> => {
   const {
     pollInterval = 5000,
-    maxWaitTime = 120000 // 2 minutes default timeout for agent
+    maxWaitTime = 300000, // 5 minutes
   } = options;
 
   const startTime = performance.now();
