@@ -3,7 +3,7 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install
 COPY . .
-RUN bun db:gen
+RUN bun prisma generate
 
 FROM oven/bun:1.3-debian AS runtime
 WORKDIR /app
