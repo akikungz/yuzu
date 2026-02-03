@@ -46,6 +46,7 @@ The service uses BullMQ for reliable job processing with Redis as the message br
 - **Cloud-Init Support** – VMs are configured with cloud-init for SSH access
 - **Network IP Management** – Automatic IP allocation and deallocation
 - **Type-Safe API** – Proxmox API types generated from OpenAPI spec
+- **Prometheus Metrics** – Built-in metrics endpoint for monitoring and alerting
 
 ## 🚀 Getting Started
 
@@ -91,6 +92,16 @@ REDIS_URL=redis://localhost:6379
 
 # Logging (optional)
 LOG_PRETTY=true
+
+# Prometheus Metrics (optional, default: 9090)
+METRICS_PORT=9090
+
+# Loki Logging (optional)
+LOKI_ENABLED=false
+LOKI_HOST=http://localhost:3100
+LOKI_LABELS=app=yuzu,env=development
+# LOKI_BASIC_AUTH_USER=your-username
+# LOKI_BASIC_AUTH_PASSWORD=your-password
 ```
 
 ### Database Setup
@@ -127,6 +138,7 @@ yuzu/
 │   │       └── schema.prisma # Database schema
 │   ├── env/                  # Environment variable validation (Zod)
 │   ├── logger/               # Pino logger configuration
+│   ├── metrics/              # Prometheus metrics & HTTP server
 │   ├── pve/                  # Proxmox VE API integration
 │   │   ├── api.ts            # OpenAPI client setup
 │   │   ├── qemu.ts           # QEMU VM operations
@@ -141,6 +153,79 @@ yuzu/
 ├── package.json
 ├── tsconfig.json
 └── prisma.config.ts
+```
+
+## 📊 Prometheus Metrics
+
+Yuzu exposes Prometheus metrics at `http://localhost:9090/metrics` (configurable via `METRICS_PORT`).
+
+### Available Endpoints
+
+| Endpoint   | Description                       |
+| ---------- | --------------------------------- |
+| `/metrics` | Prometheus metrics in text format |
+| `/health`  | Health check endpoint             |
+
+### Available Metrics
+
+| Metric                                 | Type      | Description                                            |
+| -------------------------------------- | --------- | ------------------------------------------------------ |
+| `yuzu_log_events_total`                | Counter   | Total number of log events (labels: level, service)    |
+| `yuzu_log_errors_total`                | Counter   | Total number of error log events                       |
+| `yuzu_jobs_processed_total`            | Counter   | Total number of jobs processed (labels: queue, status) |
+| `yuzu_job_duration_seconds`            | Histogram | Duration of job processing in seconds                  |
+| `yuzu_active_jobs`                     | Gauge     | Number of currently active jobs                        |
+| `yuzu_waiting_jobs`                    | Gauge     | Number of jobs waiting in queue                        |
+| `yuzu_provision_step_duration_seconds` | Histogram | Duration of each provision step                        |
+| `yuzu_instances_total`                 | Counter   | Total number of instances created                      |
+| `yuzu_vm_operations_total`             | Counter   | Total number of VM operations                          |
+| `yuzu_pve_api_calls_total`             | Counter   | Total number of PVE API calls                          |
+| `yuzu_pve_api_call_duration_seconds`   | Histogram | Duration of PVE API calls                              |
+
+Default Node.js/Bun metrics (CPU, memory, event loop) are also collected.
+
+## 📝 Loki Integration
+
+Yuzu supports sending logs to Grafana Loki for centralized log aggregation. When enabled, logs are sent to both stdout and Loki simultaneously.
+
+### Configuration
+
+Set the following environment variables to enable Loki:
+
+```env
+LOKI_ENABLED=true
+LOKI_HOST=http://localhost:3100
+LOKI_LABELS=app=yuzu,env=production
+```
+
+For authenticated Loki instances:
+
+```env
+LOKI_BASIC_AUTH_USER=your-username
+LOKI_BASIC_AUTH_PASSWORD=your-password
+```
+
+### Grafana Dashboard
+
+With Prometheus metrics and Loki logs, you can create dashboards that correlate metrics with log events. Use the following LogQL query to filter logs:
+
+```logql
+{app="yuzu"} |= "error"
+```
+
+Example Prometheus alert rule that links to logs:
+
+```yaml
+groups:
+  - name: yuzu-alerts
+    rules:
+      - alert: HighErrorRate
+        expr: rate(yuzu_log_errors_total[5m]) > 0.1
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate in Yuzu"
+          dashboard: "http://grafana/explore?expr={app=\"yuzu\"} |= \"error\""
 ```
 
 ## 🔧 Queue Workers

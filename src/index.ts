@@ -3,10 +3,14 @@ import { Redis } from "ioredis";
 import { prisma } from "@yuzu/database";
 import { env } from "@yuzu/env";
 import { logger } from "@yuzu/logger";
+import { startMetricsServer } from "@yuzu/metrics";
 
 import { ProvisionQueueWorker } from "@yuzu/queue/provision";
 import { DeprovisionQueueWorker } from "@yuzu/queue/deprovision";
 import { ToggleStatusQueueWorker } from "@yuzu/queue/toggle-status";
+
+// Start metrics server
+await startMetricsServer(env.METRICS_PORT);
 
 const redisConnection = new Redis(env.REDIS_URL, {
   maxRetriesPerRequest: null,
