@@ -4,6 +4,13 @@ import type { Logger } from "pino";
 
 import { type PrismaClient } from "@yuzu/database";
 import { logger as rootLogger } from "@yuzu/logger";
+import {
+  activeJobsGauge,
+  jobDurationSeconds,
+  jobProcessedTotal,
+  pveApiCallDurationSeconds,
+  pveApiCallsTotal
+} from "@yuzu/metrics";
 import { generateNextVmid, getNodeWithLeastLoad, upidStatusCheck } from "@yuzu/pve/shared";
 import * as qemu from "@yuzu/pve/qemu";
 
@@ -17,10 +24,11 @@ interface ProvisionStepResult {
 export class ProvisionQueueWorker {
   private worker: Worker;
   private logger = rootLogger.child({ service: "provision-worker" });
+  private readonly queueName = "provision-instance";
 
   constructor(private redisConnection: Redis, private prisma: PrismaClient) {
     this.worker = new Worker(
-      "provision-instance",
+      this.queueName,
       async (job) => {
         const jobLogger = this.logger.child({
           jobId: job.id,
@@ -41,6 +49,9 @@ export class ProvisionQueueWorker {
             );
 
             const totalDuration = performance.now() - startTime;
+            const durationSeconds = totalDuration / 1000;
+            jobProcessedTotal.inc({ queue: this.queueName, status: "success" });
+            jobDurationSeconds.observe({ queue: this.queueName, status: "success" }, durationSeconds);
             jobLogger.info({
               duration: `${totalDuration.toFixed(2)}ms`,
               steps: result.steps
@@ -55,12 +66,17 @@ export class ProvisionQueueWorker {
             }
           } catch (err) {
             const totalDuration = performance.now() - startTime;
+            const durationSeconds = totalDuration / 1000;
+            const willRetry = job.attemptsMade < (job.opts.attempts || 0) - 1;
+            const statusLabel = willRetry ? "retry" : "failed";
+            jobProcessedTotal.inc({ queue: this.queueName, status: statusLabel });
+            jobDurationSeconds.observe({ queue: this.queueName, status: statusLabel }, durationSeconds);
             const error = err as Error;
 
             jobLogger.error({
               err: { message: error.message, stack: error.stack },
               duration: `${totalDuration.toFixed(2)}ms`,
-              willRetry: job.attemptsMade < (job.opts.attempts || 0) - 1
+              willRetry
             }, "Provision job failed");
 
             if (job.attemptsMade < job.opts.attempts! - 1) {
@@ -93,10 +109,12 @@ export class ProvisionQueueWorker {
     );
 
     this.worker.on("active", (job) => {
+      activeJobsGauge.inc({ queue: this.queueName });
       this.logger.info({ jobId: job.id, instanceId: job.data?.instanceId }, "Job activated");
     });
 
     this.worker.on("completed", (job, result) => {
+      activeJobsGauge.dec({ queue: this.queueName });
       this.logger.info({
         jobId: job.id,
         instanceId: job.data?.instanceId,
@@ -105,6 +123,7 @@ export class ProvisionQueueWorker {
     });
 
     this.worker.on("failed", (job, err) => {
+      activeJobsGauge.dec({ queue: this.queueName });
       this.logger.error({
         jobId: job?.id,
         instanceId: job?.data?.instanceId,
@@ -146,6 +165,27 @@ export class ProvisionQueueWorker {
         duration: `${duration.toFixed(2)}ms`,
         err: { message: error.message, stack: error.stack }
       }, `Failed: ${stepName}`);
+      throw err;
+    }
+  }
+
+  private async recordPveCall<T>(
+    endpoint: string,
+    method: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const startTime = performance.now();
+
+    try {
+      const result = await operation();
+      const durationSeconds = (performance.now() - startTime) / 1000;
+      pveApiCallsTotal.inc({ endpoint, method, status: "success" });
+      pveApiCallDurationSeconds.observe({ endpoint, method }, durationSeconds);
+      return result;
+    } catch (err) {
+      const durationSeconds = (performance.now() - startTime) / 1000;
+      pveApiCallsTotal.inc({ endpoint, method, status: "error" });
+      pveApiCallDurationSeconds.observe({ endpoint, method }, durationSeconds);
       throw err;
     }
   }
@@ -204,7 +244,7 @@ export class ProvisionQueueWorker {
       async () => {
         const [vmid, node] = await Promise.all([
           this.generateNextVmid(),
-          getNodeWithLeastLoad()
+          this.recordPveCall("/api2/json/nodes", "GET", () => getNodeWithLeastLoad())
         ]);
         return [vmid, node] as const;
       }
@@ -226,7 +266,9 @@ export class ProvisionQueueWorker {
     const { result: cloneUpid, duration: cloneDuration } = await this.executeStep(
       "clone-vm",
       provisionLog,
-      () => qemu.cloneQemu(template.pveNode.name, template.vmId, targetId, targetNode, hostname)
+      () => this.recordPveCall("/api2/json/nodes/{node}/qemu/{vmid}/clone", "POST", () =>
+        qemu.cloneQemu(template.pveNode.name, template.vmId, targetId, targetNode, hostname)
+      )
     );
 
     provisionLog.debug({ upid: cloneUpid }, "Clone task initiated, waiting for completion");
@@ -234,7 +276,9 @@ export class ProvisionQueueWorker {
     const { duration: cloneWaitDuration } = await this.executeStep(
       "wait-clone-completion",
       provisionLog,
-      () => upidStatusCheck(template.pveNode.name, cloneUpid)
+      () => this.recordPveCall("/api2/json/nodes/{node}/tasks/{upid}/status", "GET", () =>
+        upidStatusCheck(template.pveNode.name, cloneUpid)
+      )
     );
     steps.push({
       step: "clone-vm",
@@ -294,13 +338,17 @@ export class ProvisionQueueWorker {
     const { result: resizeUpid, duration: resizeDuration } = await this.executeStep(
       "resize-disk",
       ipLog,
-      () => qemu.resizeQemuDisk(targetNode, targetId, instance.diskGB)
+      () => this.recordPveCall("/api2/json/nodes/{node}/qemu/{vmid}/resize", "PUT", () =>
+        qemu.resizeQemuDisk(targetNode, targetId, instance.diskGB)
+      )
     );
 
     const { duration: resizeWaitDuration } = await this.executeStep(
       "wait-resize-completion",
       ipLog,
-      () => upidStatusCheck(targetNode, resizeUpid)
+      () => this.recordPveCall("/api2/json/nodes/{node}/tasks/{upid}/status", "GET", () =>
+        upidStatusCheck(targetNode, resizeUpid)
+      )
     );
     steps.push({
       step: "resize-disk",
@@ -320,7 +368,9 @@ export class ProvisionQueueWorker {
     const { duration: configDuration } = await this.executeStep(
       "configure-vm",
       ipLog,
-      () => qemu.editQemu(targetNode, targetId, instance.cpus, instance.memoryMB, ipConfig)
+      () => this.recordPveCall("/api2/json/nodes/{node}/qemu/{vmid}/config", "PUT", () =>
+        qemu.editQemu(targetNode, targetId, instance.cpus, instance.memoryMB, ipConfig)
+      )
     );
     steps.push({
       step: "configure-vm",
@@ -353,13 +403,17 @@ export class ProvisionQueueWorker {
     const { result: startUpid, duration: startDuration } = await this.executeStep(
       "start-vm",
       ipLog,
-      () => qemu.setQemuStatus(targetNode, targetId, "start")
+      () => this.recordPveCall("/api2/json/nodes/{node}/qemu/{vmid}/status/start", "POST", () =>
+        qemu.setQemuStatus(targetNode, targetId, "start")
+      )
     );
 
     const { duration: startWaitDuration } = await this.executeStep(
       "wait-vm-start",
       ipLog,
-      () => upidStatusCheck(targetNode, startUpid)
+      () => this.recordPveCall("/api2/json/nodes/{node}/tasks/{upid}/status", "GET", () =>
+        upidStatusCheck(targetNode, startUpid)
+      )
     );
     steps.push({
       step: "start-vm",
@@ -373,7 +427,9 @@ export class ProvisionQueueWorker {
       const { duration: agentDuration } = await this.executeStep(
         "wait-guest-agent",
         ipLog,
-        () => qemu.agentCheckQemu(targetNode, targetId)
+        () => this.recordPveCall("/api2/json/nodes/{node}/qemu/{vmid}/agent/info", "GET", () =>
+          qemu.agentCheckQemu(targetNode, targetId)
+        )
       );
       steps.push({ step: "wait-guest-agent", duration: agentDuration, success: true });
     } catch (err) {

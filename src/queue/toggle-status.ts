@@ -4,6 +4,13 @@ import type { Logger } from "pino";
 
 import { type PrismaClient } from "@yuzu/database";
 import { logger as rootLogger } from "@yuzu/logger";
+import {
+  activeJobsGauge,
+  jobDurationSeconds,
+  jobProcessedTotal,
+  pveApiCallDurationSeconds,
+  pveApiCallsTotal
+} from "@yuzu/metrics";
 import { upidStatusCheck } from "@yuzu/pve/shared";
 import * as qemu from "@yuzu/pve/qemu";
 
@@ -19,10 +26,11 @@ type ToggleAction = "START" | "STOP" | "RESTART";
 export class ToggleStatusQueueWorker {
   private worker: Worker;
   private logger = rootLogger.child({ service: "toggle-status-worker" });
+  private readonly queueName = "toggle-instance-status";
 
   constructor(private redisConnection: Redis, private prisma: PrismaClient) {
     this.worker = new Worker(
-      "toggle-instance-status",
+      this.queueName,
       async (job) => {
         const jobLogger = this.logger.child({
           jobId: job.id,
@@ -44,6 +52,9 @@ export class ToggleStatusQueueWorker {
             );
 
             const totalDuration = performance.now() - startTime;
+            const durationSeconds = totalDuration / 1000;
+            jobProcessedTotal.inc({ queue: this.queueName, status: "success" });
+            jobDurationSeconds.observe({ queue: this.queueName, status: "success" }, durationSeconds);
             jobLogger.info({
               duration: `${totalDuration.toFixed(2)}ms`,
               steps: result.steps
@@ -58,12 +69,17 @@ export class ToggleStatusQueueWorker {
             };
           } catch (err) {
             const totalDuration = performance.now() - startTime;
+            const durationSeconds = totalDuration / 1000;
+            const willRetry = job.attemptsMade < (job.opts.attempts || 0) - 1;
+            const statusLabel = willRetry ? "retry" : "failed";
+            jobProcessedTotal.inc({ queue: this.queueName, status: statusLabel });
+            jobDurationSeconds.observe({ queue: this.queueName, status: statusLabel }, durationSeconds);
             const error = err as Error;
 
             jobLogger.error({
               err: { message: error.message, stack: error.stack },
               duration: `${totalDuration.toFixed(2)}ms`,
-              willRetry: job.attemptsMade < (job.opts.attempts || 0) - 1
+              willRetry
             }, "Toggle status job failed");
 
             if (job.attemptsMade < job.opts.attempts! - 1) {
@@ -91,10 +107,12 @@ export class ToggleStatusQueueWorker {
     );
 
     this.worker.on("active", (job) => {
+      activeJobsGauge.inc({ queue: this.queueName });
       this.logger.info({ jobId: job.id, instanceId: job.data?.instanceId }, "Job activated");
     });
 
     this.worker.on("completed", (job, result) => {
+      activeJobsGauge.dec({ queue: this.queueName });
       this.logger.info({
         jobId: job.id,
         instanceId: job.data?.instanceId,
@@ -103,6 +121,7 @@ export class ToggleStatusQueueWorker {
     });
 
     this.worker.on("failed", (job, err) => {
+      activeJobsGauge.dec({ queue: this.queueName });
       this.logger.error({
         jobId: job?.id,
         instanceId: job?.data?.instanceId,
@@ -144,6 +163,27 @@ export class ToggleStatusQueueWorker {
         duration: `${duration.toFixed(2)}ms`,
         err: { message: error.message, stack: error.stack }
       }, `Failed: ${stepName}`);
+      throw err;
+    }
+  }
+
+  private async recordPveCall<T>(
+    endpoint: string,
+    method: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const startTime = performance.now();
+
+    try {
+      const result = await operation();
+      const durationSeconds = (performance.now() - startTime) / 1000;
+      pveApiCallsTotal.inc({ endpoint, method, status: "success" });
+      pveApiCallDurationSeconds.observe({ endpoint, method }, durationSeconds);
+      return result;
+    } catch (err) {
+      const durationSeconds = (performance.now() - startTime) / 1000;
+      pveApiCallsTotal.inc({ endpoint, method, status: "error" });
+      pveApiCallDurationSeconds.observe({ endpoint, method }, durationSeconds);
       throw err;
     }
   }
@@ -201,7 +241,9 @@ export class ToggleStatusQueueWorker {
     const { result: currentStatus, duration: statusCheckDuration } = await this.executeStep(
       "check-current-status",
       vmLog,
-      () => qemu.getQemuStatus(pveVm.pveNode.name, pveVm.vmId)
+      () => this.recordPveCall("/api2/json/nodes/{node}/qemu/{vmid}/status/current", "GET", () =>
+        qemu.getQemuStatus(pveVm.pveNode.name, pveVm.vmId)
+      )
     );
     steps.push({
       step: "check-current-status",
@@ -294,13 +336,17 @@ export class ToggleStatusQueueWorker {
     const { result: startUpid, duration: startDuration } = await this.executeStep(
       "start-vm",
       log,
-      () => qemu.setQemuStatus(pveVm.pveNode.name, pveVm.vmId, "start")
+      () => this.recordPveCall("/api2/json/nodes/{node}/qemu/{vmid}/status/start", "POST", () =>
+        qemu.setQemuStatus(pveVm.pveNode.name, pveVm.vmId, "start")
+      )
     );
 
     const { duration: waitDuration } = await this.executeStep(
       "wait-vm-start",
       log,
-      () => upidStatusCheck(pveVm.pveNode.name, startUpid)
+      () => this.recordPveCall("/api2/json/nodes/{node}/tasks/{upid}/status", "GET", () =>
+        upidStatusCheck(pveVm.pveNode.name, startUpid)
+      )
     );
 
     steps.push({
@@ -314,7 +360,9 @@ export class ToggleStatusQueueWorker {
     const { duration: agentDuration } = await this.executeStep(
       "wait-guest-agent",
       log,
-      () => qemu.agentCheckQemu(pveVm.pveNode.name, pveVm.vmId)
+      () => this.recordPveCall("/api2/json/nodes/{node}/qemu/{vmid}/agent/info", "GET", () =>
+        qemu.agentCheckQemu(pveVm.pveNode.name, pveVm.vmId)
+      )
     );
     steps.push({ step: "wait-guest-agent", duration: agentDuration, success: true });
   }
@@ -339,13 +387,17 @@ export class ToggleStatusQueueWorker {
     const { result: stopUpid, duration: stopDuration } = await this.executeStep(
       "stop-vm",
       log,
-      () => qemu.setQemuStatus(pveVm.pveNode.name, pveVm.vmId, "stop")
+      () => this.recordPveCall("/api2/json/nodes/{node}/qemu/{vmid}/status/stop", "POST", () =>
+        qemu.setQemuStatus(pveVm.pveNode.name, pveVm.vmId, "stop")
+      )
     );
 
     const { duration: waitDuration } = await this.executeStep(
       "wait-vm-stop",
       log,
-      () => upidStatusCheck(pveVm.pveNode.name, stopUpid)
+      () => this.recordPveCall("/api2/json/nodes/{node}/tasks/{upid}/status", "GET", () =>
+        upidStatusCheck(pveVm.pveNode.name, stopUpid)
+      )
     );
 
     steps.push({
@@ -367,13 +419,17 @@ export class ToggleStatusQueueWorker {
       const { result: resetUpid, duration: resetDuration } = await this.executeStep(
         "reset-vm",
         log,
-        () => qemu.setQemuStatus(pveVm.pveNode.name, pveVm.vmId, "reset")
+        () => this.recordPveCall("/api2/json/nodes/{node}/qemu/{vmid}/status/reset", "POST", () =>
+          qemu.setQemuStatus(pveVm.pveNode.name, pveVm.vmId, "reset")
+        )
       );
 
       const { duration: waitDuration } = await this.executeStep(
         "wait-vm-reset",
         log,
-        () => upidStatusCheck(pveVm.pveNode.name, resetUpid)
+        () => this.recordPveCall("/api2/json/nodes/{node}/tasks/{upid}/status", "GET", () =>
+          upidStatusCheck(pveVm.pveNode.name, resetUpid)
+        )
       );
 
       steps.push({
@@ -389,13 +445,17 @@ export class ToggleStatusQueueWorker {
       const { result: startUpid, duration: startDuration } = await this.executeStep(
         "start-vm",
         log,
-        () => qemu.setQemuStatus(pveVm.pveNode.name, pveVm.vmId, "start")
+        () => this.recordPveCall("/api2/json/nodes/{node}/qemu/{vmid}/status/start", "POST", () =>
+          qemu.setQemuStatus(pveVm.pveNode.name, pveVm.vmId, "start")
+        )
       );
 
       const { duration: waitDuration } = await this.executeStep(
         "wait-vm-start",
         log,
-        () => upidStatusCheck(pveVm.pveNode.name, startUpid)
+        () => this.recordPveCall("/api2/json/nodes/{node}/tasks/{upid}/status", "GET", () =>
+          upidStatusCheck(pveVm.pveNode.name, startUpid)
+        )
       );
 
       steps.push({
@@ -410,7 +470,9 @@ export class ToggleStatusQueueWorker {
     const { duration: agentDuration } = await this.executeStep(
       "wait-guest-agent",
       log,
-      () => qemu.agentCheckQemu(pveVm.pveNode.name, pveVm.vmId)
+      () => this.recordPveCall("/api2/json/nodes/{node}/qemu/{vmid}/agent/info", "GET", () =>
+        qemu.agentCheckQemu(pveVm.pveNode.name, pveVm.vmId)
+      )
     );
     steps.push({ step: "wait-guest-agent", duration: agentDuration, success: true });
   }

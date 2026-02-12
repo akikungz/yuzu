@@ -4,6 +4,13 @@ import type { Logger } from "pino";
 
 import { type PrismaClient } from "@yuzu/database";
 import { logger as rootLogger } from "@yuzu/logger";
+import {
+  activeJobsGauge,
+  jobDurationSeconds,
+  jobProcessedTotal,
+  pveApiCallDurationSeconds,
+  pveApiCallsTotal
+} from "@yuzu/metrics";
 import { upidStatusCheck } from "@yuzu/pve/shared";
 import * as qemu from "@yuzu/pve/qemu";
 
@@ -17,10 +24,11 @@ interface DeprovisionStepResult {
 export class DeprovisionQueueWorker {
   private worker: Worker;
   private logger = rootLogger.child({ service: "deprovision-worker" });
+  private readonly queueName = "deprovision-instance";
 
   constructor(private redisConnection: Redis, private prisma: PrismaClient) {
     this.worker = new Worker(
-      "deprovision-instance",
+      this.queueName,
       async (job) => {
         const jobLogger = this.logger.child({
           jobId: job.id,
@@ -41,6 +49,9 @@ export class DeprovisionQueueWorker {
             );
 
             const totalDuration = performance.now() - startTime;
+            const durationSeconds = totalDuration / 1000;
+            jobProcessedTotal.inc({ queue: this.queueName, status: "success" });
+            jobDurationSeconds.observe({ queue: this.queueName, status: "success" }, durationSeconds);
             jobLogger.info({
               duration: `${totalDuration.toFixed(2)}ms`,
               steps: result.steps
@@ -55,12 +66,17 @@ export class DeprovisionQueueWorker {
             };
           } catch (err) {
             const totalDuration = performance.now() - startTime;
+            const durationSeconds = totalDuration / 1000;
+            const willRetry = job.attemptsMade < (job.opts.attempts || 0) - 1;
+            const statusLabel = willRetry ? "retry" : "failed";
+            jobProcessedTotal.inc({ queue: this.queueName, status: statusLabel });
+            jobDurationSeconds.observe({ queue: this.queueName, status: statusLabel }, durationSeconds);
             const error = err as Error;
 
             jobLogger.error({
               err: { message: error.message, stack: error.stack },
               duration: `${totalDuration.toFixed(2)}ms`,
-              willRetry: job.attemptsMade < (job.opts.attempts || 0) - 1
+              willRetry
             }, "Deprovision job failed");
 
             if (job.attemptsMade < job.opts.attempts! - 1) {
@@ -96,10 +112,12 @@ export class DeprovisionQueueWorker {
     );
 
     this.worker.on("active", (job) => {
+      activeJobsGauge.inc({ queue: this.queueName });
       this.logger.info({ jobId: job.id, instanceId: job.data?.instanceId }, "Job activated");
     });
 
     this.worker.on("completed", (job, result) => {
+      activeJobsGauge.dec({ queue: this.queueName });
       this.logger.info({
         jobId: job.id,
         instanceId: job.data?.instanceId,
@@ -108,6 +126,7 @@ export class DeprovisionQueueWorker {
     });
 
     this.worker.on("failed", (job, err) => {
+      activeJobsGauge.dec({ queue: this.queueName });
       this.logger.error({
         jobId: job?.id,
         instanceId: job?.data?.instanceId,
@@ -149,6 +168,27 @@ export class DeprovisionQueueWorker {
         duration: `${duration.toFixed(2)}ms`,
         err: { message: error.message, stack: error.stack }
       }, `Failed: ${stepName}`);
+      throw err;
+    }
+  }
+
+  private async recordPveCall<T>(
+    endpoint: string,
+    method: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const startTime = performance.now();
+
+    try {
+      const result = await operation();
+      const durationSeconds = (performance.now() - startTime) / 1000;
+      pveApiCallsTotal.inc({ endpoint, method, status: "success" });
+      pveApiCallDurationSeconds.observe({ endpoint, method }, durationSeconds);
+      return result;
+    } catch (err) {
+      const durationSeconds = (performance.now() - startTime) / 1000;
+      pveApiCallsTotal.inc({ endpoint, method, status: "error" });
+      pveApiCallDurationSeconds.observe({ endpoint, method }, durationSeconds);
       throw err;
     }
   }
@@ -234,7 +274,9 @@ export class DeprovisionQueueWorker {
     // Step 3: Stop VM if running
     const { result: currentStatus, duration: statusCheckDuration } =
       await this.executeStep("check-vm-status", vmLog, () =>
-        qemu.getQemuStatus(pveVm.pveNode.name, pveVm.vmId)
+        this.recordPveCall("/api2/json/nodes/{node}/qemu/{vmid}/status/current", "GET", () =>
+          qemu.getQemuStatus(pveVm.pveNode.name, pveVm.vmId)
+        )
       );
     steps.push({
       step: "check-vm-status",
@@ -249,13 +291,17 @@ export class DeprovisionQueueWorker {
       const { result: stopUpid, duration: stopDuration } = await this.executeStep(
         "stop-vm",
         vmLog,
-        () => qemu.setQemuStatus(pveVm.pveNode.name, pveVm.vmId, "stop")
+        () => this.recordPveCall(`/api2/json/nodes/{node}/qemu/{vmid}/status/stop`, "POST", () =>
+          qemu.setQemuStatus(pveVm.pveNode.name, pveVm.vmId, "stop")
+        )
       );
 
       const { duration: stopWaitDuration } = await this.executeStep(
         "wait-vm-stop",
         vmLog,
-        () => upidStatusCheck(pveVm.pveNode.name, stopUpid)
+        () => this.recordPveCall("/api2/json/nodes/{node}/tasks/{upid}/status", "GET", () =>
+          upidStatusCheck(pveVm.pveNode.name, stopUpid)
+        )
       );
       steps.push({
         step: "stop-vm",
@@ -271,7 +317,9 @@ export class DeprovisionQueueWorker {
     const { duration: deleteDuration } = await this.executeStep(
       "delete-vm-proxmox",
       vmLog,
-      () => qemu.deleteQemu(pveVm.pveNode.name, pveVm.vmId)
+      () => this.recordPveCall("/api2/json/nodes/{node}/qemu/{vmid}", "DELETE", () =>
+        qemu.deleteQemu(pveVm.pveNode.name, pveVm.vmId)
+      )
     );
     steps.push({
       step: "delete-vm-proxmox",
