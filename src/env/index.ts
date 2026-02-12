@@ -9,12 +9,6 @@ export const envSchema = z.object({
   REDIS_URL: z.string().min(1),
   LOG_PRETTY: z.coerce.boolean().default(false),
   METRICS_PORT: z.coerce.number().default(9090),
-  // Loki configuration (optional)
-  LOKI_ENABLED: z.coerce.boolean().default(false),
-  LOKI_HOST: z.string().default("http://localhost:3100"),
-  LOKI_BASIC_AUTH_USER: z.string().optional(),
-  LOKI_BASIC_AUTH_PASSWORD: z.string().optional(),
-  LOKI_LABELS: z.string().default("app=yuzu"),
 });
 
 const _safeEnv = envSchema.safeParse(process.env);

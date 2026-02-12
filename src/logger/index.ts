@@ -2,90 +2,46 @@ import pino, { transport, type Logger, type LoggerOptions } from "pino";
 
 import { env } from "@yuzu/env";
 
-// Parse Loki labels from environment variable (format: "key1=value1,key2=value2")
-function parseLokiLabels(labelsStr: string): Record<string, string> {
-  const labels: Record<string, string> = {};
-  labelsStr.split(",").forEach((pair) => {
-    const [key, value] = pair.split("=");
-    if (key && value) {
-      labels[key.trim()] = value.trim();
-    }
-  });
-  return labels;
-}
+/**
+ * Logger configuration for Kubernetes deployment with Promtail.
+ *
+ * Outputs structured JSON logs to stdout which Promtail scrapes and forwards to Loki.
+ * In development mode with LOG_PRETTY=true, uses pino-pretty for human-readable output.
+ */
 
-// Build transport targets based on configuration
-function buildTransportTargets(): pino.TransportTargetOptions[] {
-  const targets: pino.TransportTargetOptions[] = [];
-
-  // Console transport (pretty or JSON)
+// Build transport based on configuration
+function buildTransport() {
   if (env.LOG_PRETTY) {
-    targets.push({
+    return transport({
       target: "pino-pretty",
       options: {
         colorize: true,
         translateTime: "SYS:standard",
         ignore: "pid,hostname",
       },
-      level: "trace",
-    });
-  } else {
-    targets.push({
-      target: "pino/file",
-      options: { destination: 1 }, // stdout
-      level: "trace",
     });
   }
-
-  // Loki transport (if enabled)
-  if (env.LOKI_ENABLED) {
-    const lokiOptions: Record<string, unknown> = {
-      host: env.LOKI_HOST,
-      labels: parseLokiLabels(env.LOKI_LABELS),
-      batching: true,
-      interval: 5, // Send logs every 5 seconds
-    };
-
-    // Add basic auth if configured
-    if (env.LOKI_BASIC_AUTH_USER && env.LOKI_BASIC_AUTH_PASSWORD) {
-      lokiOptions.basicAuth = {
-        username: env.LOKI_BASIC_AUTH_USER,
-        password: env.LOKI_BASIC_AUTH_PASSWORD,
-      };
-    }
-
-    targets.push({
-      target: "pino-loki",
-      options: lokiOptions,
-      level: "trace",
-    });
-  }
-
-  return targets;
+  // Default: JSON output to stdout (Promtail will scrape this)
+  return undefined;
 }
-
-// Create the logger with configured transports
-const transportTargets = buildTransportTargets();
-
-const loggerTransport = transport({
-  targets: transportTargets,
-});
 
 const loggerOptions: LoggerOptions = {
   level: env.NODE_ENV === "production" ? "info" : "debug",
   base: {
+    app: "yuzu",
     env: env.NODE_ENV,
+  },
+  // Add timestamp in ISO format for Promtail parsing
+  timestamp: pino.stdTimeFunctions.isoTime,
+  // Format error objects properly
+  formatters: {
+    level: (label) => ({ level: label }),
   },
 };
 
-export const logger: Logger = pino(loggerOptions, loggerTransport);
+export const logger: Logger = pino(loggerOptions, buildTransport());
 
 // Export a function to create child loggers with additional context
 export function createLogger(context: Record<string, unknown>): Logger {
   return logger.child(context);
-}
-
-// Log startup information
-if (env.LOKI_ENABLED) {
-  logger.info({ lokiHost: env.LOKI_HOST }, "Loki logging enabled");
 }
