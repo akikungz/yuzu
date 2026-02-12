@@ -73,7 +73,7 @@ bunx prisma generate
 
 ### Configuration
 
-Create a `.env` file (or `.env.development` for dev) with the following variables:
+Copy `.env.example` to `.env` (or `.env.development` for dev) and update the values. For full details, see `docs/env.md`.
 
 ```env
 # Environment
@@ -183,6 +183,8 @@ Yuzu exposes Prometheus metrics at `http://localhost:9090/metrics` (configurable
 | `yuzu_pve_api_call_duration_seconds`   | Histogram | Duration of PVE API calls                              |
 
 Default Node.js/Bun metrics (CPU, memory, event loop) are also collected.
+
+For dashboards, logs, and tracing guidance, see `docs/observability.md`.
 
 ## 📝 Loki Integration
 
