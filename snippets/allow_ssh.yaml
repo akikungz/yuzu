@@ -4,10 +4,6 @@ users:
     shell: /bin/bash
     sudo: "ALL=(ALL) NOPASSWD:ALL"
 ssh_pwauth: True
-chpasswd:
-  expire: True
-  list: |
-    user:password
 package_reboot_if_required: true
 package_update: true
 package_upgrade: true

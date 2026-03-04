@@ -1,8 +1,10 @@
 import { Redis } from "ioredis";
 import { Worker } from "bullmq";
 import type { Logger } from "pino";
+import { randomBytes } from "node:crypto";
 
 import { type PrismaClient } from "@yuzu/database";
+import { env } from "@yuzu/env";
 import { logger as rootLogger } from "@yuzu/logger";
 import {
   activeJobsGauge,
@@ -24,7 +26,7 @@ interface ProvisionStepResult {
 export class ProvisionQueueWorker {
   private worker: Worker;
   private logger = rootLogger.child({ service: "provision-worker" });
-  private readonly queueName = "provision-instance";
+  private readonly queueName = `${env.NODE_ENV}_provision-instance`;
 
   constructor(private redisConnection: Redis, private prisma: PrismaClient) {
     this.worker = new Worker(
@@ -100,7 +102,7 @@ export class ProvisionQueueWorker {
         throw new Error(`Unknown job type: ${job.name}`);
       },
       {
-        connection: this.redisConnection,
+        connection: this.redisConnection.options,
         concurrency: 5,
         lockDuration: 300000, // 5 minutes to handle long-running clone operations
         stalledInterval: 5000, // Check for stalled jobs every 5 seconds
@@ -364,12 +366,23 @@ export class ProvisionQueueWorker {
       ip: `${pickedIp.ipAddress}/${pickedIp.pveNetwork.subnet.split("/")[1]}`,
       gw: pickedIp.pveNetwork.gateway,
     };
+    const defaultUserCredentials = {
+      username: "user",
+      password: this.generateRandomPassword(),
+    };
 
     const { duration: configDuration } = await this.executeStep(
       "configure-vm",
       ipLog,
       () => this.recordPveCall("/api2/json/nodes/{node}/qemu/{vmid}/config", "PUT", () =>
-        qemu.editQemu(targetNode, targetId, instance.cpus, instance.memoryMB, ipConfig)
+        qemu.editQemu(
+          targetNode,
+          targetId,
+          instance.cpus,
+          instance.memoryMB,
+          defaultUserCredentials,
+          ipConfig
+        )
       )
     );
     steps.push({
@@ -392,6 +405,7 @@ export class ProvisionQueueWorker {
           where: { id: instanceId },
           data: {
             provisionStatus: "COMPLETED",
+            defaultPassword: defaultUserCredentials.password,
             pveVM: { connect: { id: pveVm.id } }
           }
         })
@@ -502,6 +516,19 @@ export class ProvisionQueueWorker {
     const randomNoun = nouns[Math.floor(Math.random() * nouns.length)];
 
     return `${randomAdjective}-${randomNoun}-${instanceId}`;
+  }
+
+  private generateRandomPassword(length = 16): string {
+    const charset = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*()-_=+";
+    const bytes = randomBytes(length * 2);
+    let password = "";
+
+    for (const byte of bytes) {
+      if (password.length >= length) break;
+      password += charset[byte % charset.length];
+    }
+
+    return password;
   }
 
   public close() {

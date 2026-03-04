@@ -3,6 +3,7 @@ import { Worker } from "bullmq";
 import type { Logger } from "pino";
 
 import { type PrismaClient } from "@yuzu/database";
+import { env } from "@yuzu/env";
 import { logger as rootLogger } from "@yuzu/logger";
 import {
   activeJobsGauge,
@@ -24,7 +25,7 @@ interface DeprovisionStepResult {
 export class DeprovisionQueueWorker {
   private worker: Worker;
   private logger = rootLogger.child({ service: "deprovision-worker" });
-  private readonly queueName = "deprovision-instance";
+  private readonly queueName = `${env.NODE_ENV}_deprovision-instance`;
 
   constructor(private redisConnection: Redis, private prisma: PrismaClient) {
     this.worker = new Worker(
@@ -103,7 +104,7 @@ export class DeprovisionQueueWorker {
         throw new Error(`Unknown job type: ${job.name}`);
       },
       {
-        connection: this.redisConnection,
+        connection: this.redisConnection.options,
         concurrency: 5,
         lockDuration: 180000, // 3 minutes for deprovision operations
         stalledInterval: 5000,

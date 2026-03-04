@@ -90,6 +90,10 @@ export const editQemu = async (
   vmid: number,
   cpuCores: number,
   memorySizeMB: number,
+  credentials: {
+    username: string;
+    password: string;
+  },
   ipconfig: {
     bridge: string;
     vlan: number;
@@ -106,6 +110,8 @@ export const editQemu = async (
       memory: memorySizeMB.toString(),
       "net0": `virtio,bridge=${ipconfig.bridge},tag=${ipconfig.vlan}`,
       "ipconfig0": `ip=${ipconfig.ip},gw=${ipconfig.gw}`,
+      ciuser: credentials.username,
+      cipassword: credentials.password,
       cicustom: "user=cephfs:snippets/allow_ssh.yaml",
     },
   });

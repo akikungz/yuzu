@@ -3,6 +3,7 @@ import { Worker } from "bullmq";
 import type { Logger } from "pino";
 
 import { type PrismaClient } from "@yuzu/database";
+import { env } from "@yuzu/env";
 import { logger as rootLogger } from "@yuzu/logger";
 import {
   activeJobsGauge,
@@ -26,7 +27,7 @@ type ToggleAction = "START" | "STOP" | "RESTART";
 export class ToggleStatusQueueWorker {
   private worker: Worker;
   private logger = rootLogger.child({ service: "toggle-status-worker" });
-  private readonly queueName = "toggle-instance-status";
+  private readonly queueName = `${env.NODE_ENV}_toggle-instance-status`;
 
   constructor(private redisConnection: Redis, private prisma: PrismaClient) {
     this.worker = new Worker(
@@ -98,7 +99,7 @@ export class ToggleStatusQueueWorker {
         throw new Error(`Unknown job type: ${job.name}`);
       },
       {
-        connection: this.redisConnection,
+        connection: this.redisConnection.options,
         concurrency: 10, // Higher concurrency for quick status changes
         lockDuration: 120000, // 2 minutes for status toggle operations
         stalledInterval: 5000,
