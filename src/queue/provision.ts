@@ -289,7 +289,25 @@ export class ProvisionQueueWorker {
       details: { upid: cloneUpid }
     });
 
-    // Step 5: Allocate IP address
+    // Step 5: Fetch owner SSH public keys
+    const { result: ownerSshKeys, duration: sshKeysDuration } = await this.executeStep(
+      "fetch-owner-ssh-keys",
+      provisionLog,
+      () => this.prisma.platformSSHKey.findMany({
+        where: { ownerId: instance.platformUserId },
+        select: { publicKey: true }
+      })
+    );
+    steps.push({
+      step: "fetch-owner-ssh-keys",
+      duration: sshKeysDuration,
+      success: true,
+      details: { keyCount: ownerSshKeys.length }
+    });
+
+    const sshPublicKeys = ownerSshKeys.map((key) => key.publicKey);
+
+    // Step 6: Allocate IP address
     const { result: pickedIp, duration: ipDuration } = await this.executeStep(
       "allocate-ip",
       provisionLog,
@@ -314,7 +332,7 @@ export class ProvisionQueueWorker {
       network: pickedIp.pveNetwork.name
     });
 
-    // Step 6: Create or update PVEVM record (upsert handles reprovisioning cases)
+    // Step 7: Create or update PVEVM record (upsert handles reprovisioning cases)
     const { result: pveVm, duration: createVmDuration } = await this.executeStep(
       "create-pvevm-record",
       ipLog,
@@ -336,7 +354,7 @@ export class ProvisionQueueWorker {
     );
     steps.push({ step: "create-pvevm-record", duration: createVmDuration, success: true });
 
-    // Step 7: Resize disk
+    // Step 8: Resize disk
     const { result: resizeUpid, duration: resizeDuration } = await this.executeStep(
       "resize-disk",
       ipLog,
@@ -359,7 +377,7 @@ export class ProvisionQueueWorker {
       details: { diskGB: instance.diskGB, upid: resizeUpid }
     });
 
-    // Step 8: Configure VM (network, CPU, memory)
+    // Step 9: Configure VM (network, CPU, memory)
     const ipConfig = {
       bridge: pickedIp.pveNetwork.bridge,
       vlan: pickedIp.pveNetwork.vlanTag || parseInt(pickedIp.pveNetwork.name) || 1,
@@ -381,6 +399,7 @@ export class ProvisionQueueWorker {
           instance.cpus,
           instance.memoryMB,
           defaultUserCredentials,
+          sshPublicKeys,
           ipConfig
         )
       )
@@ -392,7 +411,7 @@ export class ProvisionQueueWorker {
       details: { cpus: instance.cpus, memoryMB: instance.memoryMB, ipConfig }
     });
 
-    // Step 9: Update database records (IP allocation + instance status)
+    // Step 10: Update database records (IP allocation + instance status)
     const { duration: dbUpdateDuration } = await this.executeStep(
       "update-database-records",
       ipLog,
@@ -413,7 +432,7 @@ export class ProvisionQueueWorker {
     );
     steps.push({ step: "update-database-records", duration: dbUpdateDuration, success: true });
 
-    // Step 10: Start VM
+    // Step 11: Start VM
     const { result: startUpid, duration: startDuration } = await this.executeStep(
       "start-vm",
       ipLog,
@@ -436,7 +455,7 @@ export class ProvisionQueueWorker {
       details: { upid: startUpid }
     });
 
-    // Step 11: Wait for QEMU Guest Agent if failed, continue anyway
+    // Step 12: Wait for QEMU Guest Agent if failed, continue anyway
     try {
       const { duration: agentDuration } = await this.executeStep(
         "wait-guest-agent",
@@ -452,7 +471,7 @@ export class ProvisionQueueWorker {
       steps.push({ step: "wait-guest-agent", duration: 0, success: false, details: { error: error.message } });
     }
 
-    // Step 12: Final status update
+    // Step 13: Final status update
     const { duration: finalUpdateDuration } = await this.executeStep(
       "finalize-status",
       ipLog,
@@ -469,7 +488,7 @@ export class ProvisionQueueWorker {
     );
     steps.push({ step: "finalize-status", duration: finalUpdateDuration, success: true });
 
-    // Step 13: Invalidate cache
+    // Step 14: Invalidate cache
     const { duration: cacheDuration } = await this.executeStep(
       "invalidate-cache",
       ipLog,

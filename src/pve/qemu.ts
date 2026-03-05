@@ -94,6 +94,7 @@ export const editQemu = async (
     username: string;
     password: string;
   },
+  sshPublicKeys: string[],
   ipconfig: {
     bridge: string;
     vlan: number;
@@ -113,6 +114,7 @@ export const editQemu = async (
       ciuser: credentials.username,
       cipassword: credentials.password,
       cicustom: "user=cephfs:snippets/allow_ssh.yaml",
+      ...(sshPublicKeys.length > 0 ? { sshkeys: sshPublicKeys.join("\n") } : {}),
     },
   });
 
