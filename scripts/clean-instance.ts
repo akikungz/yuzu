@@ -34,13 +34,13 @@ async function cleanInstances() {
                   body: {},
                 });
               }
-
-              await pveApi.DELETE("/api2/json/nodes/{node}/qemu/{vmid}", {
-                params: {
-                  path: { node: node.node, vmid: vm.vmid.toString() },
-                },
-              });
             }
+
+            await pveApi.DELETE("/api2/json/nodes/{node}/qemu/{vmid}", {
+              params: {
+                path: { node: node.node, vmid: vm.vmid.toString() },
+              },
+            });
           }
         }
       }
