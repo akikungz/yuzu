@@ -479,11 +479,21 @@ export class ProvisionQueueWorker {
         )
       );
       steps.push({ step: "set-guest-user-password", duration: setPasswordDuration, success: true });
+
+      const { duration: setHostnameDuration } = await this.executeStep(
+        "set-guest-hostname",
+        ipLog,
+        () => this.recordPveCall("/api2/json/nodes/{node}/qemu/{vmid}/agent/exec", "POST", () =>
+          qemu.setQemuGuestHostname(targetNode, targetId, hostname)
+        )
+      );
+      steps.push({ step: "set-guest-hostname", duration: setHostnameDuration, success: true });
     } catch (err) {
       const error = err as Error;
       ipLog.warn({ err: { message: error.message } }, "Guest agent check failed, continuing anyway");
       steps.push({ step: "wait-guest-agent", duration: 0, success: false, details: { error: error.message } });
       steps.push({ step: "set-guest-user-password", duration: 0, success: false, details: { error: "Skipped because guest agent is unavailable" } });
+      steps.push({ step: "set-guest-hostname", duration: 0, success: false, details: { error: "Skipped because guest agent is unavailable" } });
     }
 
     // Step 13: Final status update

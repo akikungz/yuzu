@@ -298,6 +298,36 @@ export const setQemuGuestUserPassword = async (
 }
 
 /**
+ * Set a guest VM hostname through QEMU Guest Agent
+ * @param node The node where the VM is located
+ * @param vmid The ID of the VM
+ * @param hostname The new hostname for the guest
+ */
+export const setQemuGuestHostname = async (
+  node: string,
+  vmid: number,
+  hostname: string
+) => {
+  const setHostnameRes = await pveApi.POST("/api2/json/nodes/{node}/qemu/{vmid}/agent/exec", {
+    params: {
+      path: { node, vmid: vmid.toString() },
+    },
+    body: {
+      command: ["hostnamectl", "set-hostname", "--static", hostname],
+    },
+  });
+
+  if (setHostnameRes.response.ok) {
+    logger.info(`Updated guest hostname for VM ${vmid} to ${hostname}.`);
+    return;
+  }
+
+  logger.error(`Failed to set guest hostname for VM ${vmid}.`);
+  logger.trace(setHostnameRes);
+  throw new Error(`Failed to set guest hostname for VM ${vmid}.`);
+}
+
+/**
  * Delete a QEMU VM
  * @param node The node where the VM is located
  * @param vmid The ID of the VM
