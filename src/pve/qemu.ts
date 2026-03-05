@@ -102,6 +102,13 @@ export const editQemu = async (
     gw: string;
   }
 ) => {
+  const normalizedSshKeys = sshPublicKeys
+    .map((key) => key.trim())
+    .filter((key) => key.length > 0);
+
+  // Proxmox expects `sshkeys` as a URL-encoded string (newline-delimited keys).
+  const encodedSshKeys = encodeURIComponent(normalizedSshKeys.join("\n"));
+
   const editRes = await pveApi.PUT("/api2/json/nodes/{node}/qemu/{vmid}/config", {
     params: {
       path: { node, vmid: vmid.toString() },
@@ -114,7 +121,7 @@ export const editQemu = async (
       ciuser: credentials.username,
       cipassword: credentials.password,
       cicustom: "user=cephfs:snippets/allow_ssh.yaml",
-      ...(sshPublicKeys.length > 0 ? { sshkeys: sshPublicKeys.join("\n") } : {}),
+      ...(normalizedSshKeys.length > 0 ? { sshkeys: encodedSshKeys } : {}),
     },
   });
 
@@ -255,6 +262,40 @@ export const agentCheckQemu = (
     }, pollInterval);
   });
 };
+
+/**
+ * Set a guest user password through QEMU Guest Agent
+ * @param node The node where the VM is located
+ * @param vmid The ID of the VM
+ * @param username The guest username
+ * @param password The new guest password
+ */
+export const setQemuGuestUserPassword = async (
+  node: string,
+  vmid: number,
+  username: string,
+  password: string
+) => {
+  const setPasswordRes = await pveApi.POST("/api2/json/nodes/{node}/qemu/{vmid}/agent/set-user-password", {
+    params: {
+      path: { node, vmid: vmid.toString() },
+    },
+    body: {
+      username,
+      password,
+      crypted: false,
+    },
+  });
+
+  if (setPasswordRes.response.ok) {
+    logger.info(`Updated guest password for VM ${vmid} user ${username}.`);
+    return;
+  }
+
+  logger.error(`Failed to set guest password for VM ${vmid} user ${username}.`);
+  logger.trace(setPasswordRes);
+  throw new Error(`Failed to set guest password for VM ${vmid} user ${username}.`);
+}
 
 /**
  * Delete a QEMU VM

@@ -465,10 +465,25 @@ export class ProvisionQueueWorker {
         )
       );
       steps.push({ step: "wait-guest-agent", duration: agentDuration, success: true });
+
+      const { duration: setPasswordDuration } = await this.executeStep(
+        "set-guest-user-password",
+        ipLog,
+        () => this.recordPveCall("/api2/json/nodes/{node}/qemu/{vmid}/agent/set-user-password", "POST", () =>
+          qemu.setQemuGuestUserPassword(
+            targetNode,
+            targetId,
+            defaultUserCredentials.username,
+            defaultUserCredentials.password
+          )
+        )
+      );
+      steps.push({ step: "set-guest-user-password", duration: setPasswordDuration, success: true });
     } catch (err) {
       const error = err as Error;
       ipLog.warn({ err: { message: error.message } }, "Guest agent check failed, continuing anyway");
       steps.push({ step: "wait-guest-agent", duration: 0, success: false, details: { error: error.message } });
+      steps.push({ step: "set-guest-user-password", duration: 0, success: false, details: { error: "Skipped because guest agent is unavailable" } });
     }
 
     // Step 13: Final status update
@@ -538,7 +553,8 @@ export class ProvisionQueueWorker {
   }
 
   private generateRandomPassword(length = 16): string {
-    const charset = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*()-_=+";
+    // Keep password transport/copy-safe for cloud-init and API form-encoding layers.
+    const charset = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
     const bytes = randomBytes(length * 2);
     let password = "";
 
