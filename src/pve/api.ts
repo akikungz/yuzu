@@ -1,5 +1,5 @@
 import createClient from "openapi-fetch";
-import { Agent } from "undici";
+import { Agent } from "undici-types";
 
 import type { paths } from "./type";
 import { env } from "@yuzu/env";
@@ -12,5 +12,9 @@ export const pveApi = createClient<paths>({
   headers: {
     Authorization: `PVEAPIToken=${env.PVE_API_TOKEN_ID}=${env.PVE_API_TOKEN_SECRET}`,
   },
-  dispatcher: new Agent(),
+  dispatcher: new Agent({
+    connect: {
+      rejectUnauthorized: false,
+    }
+  }),
 });

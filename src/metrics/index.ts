@@ -104,7 +104,7 @@ export const pveApiCallDurationSeconds = new Histogram({
 });
 
 // Start HTTP server for metrics endpoint
-export async function startMetricsServer(port: number): Promise<void> {
+export async function startMetricsServer(port: number) {
   const server = Bun.serve({
     port,
     fetch: async (request) => {
@@ -133,4 +133,5 @@ export async function startMetricsServer(port: number): Promise<void> {
   });
 
   logger.info({ port: server.port }, "Metrics server started");
+  return server;
 }
