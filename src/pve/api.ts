@@ -1,5 +1,5 @@
 import createClient from "openapi-fetch";
-import { Agent } from "undici-types";
+import { Agent } from "undici";
 
 import type { paths } from "./type";
 import { env } from "@yuzu/env";
