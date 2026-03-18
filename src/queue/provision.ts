@@ -380,7 +380,7 @@ export class ProvisionQueueWorker {
     // Step 9: Configure VM (network, CPU, memory)
     const ipConfig = {
       bridge: pickedIp.pveNetwork.bridge,
-      vlan: pickedIp.pveNetwork.vlanTag || parseInt(pickedIp.pveNetwork.name) || 1,
+      vlan: parseInt(pickedIp.pveNetwork.name) || 1,
       ip: `${pickedIp.ipAddress}/${pickedIp.pveNetwork.subnet.split("/")[1]}`,
       gw: pickedIp.pveNetwork.gateway,
     };
