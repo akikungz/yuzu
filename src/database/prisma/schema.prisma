@@ -244,6 +244,7 @@ model Instance {
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
   semesterId             Int?
+  defaultPassword        String?
   extendedRequests       ExtendedRequest[]
   courseOffering         CourseOffering?         @relation(fields: [courseOfferingId], references: [id], onDelete: Restrict)
   platformUser           PlatformUser            @relation(fields: [platformUserId], references: [id])
