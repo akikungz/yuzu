@@ -22,8 +22,8 @@ export const envSchema = z.object({
 	OTEL_EXPORTER_OTLP_LOGS_PASSWORD: z.string().optional(),
 	OTEL_EXPORTER_OTLP_METRICS_USERNAME: z.string().optional(),
 	OTEL_EXPORTER_OTLP_METRICS_PASSWORD: z.string().optional(),
-	OTEL_METRIC_EXPORT_INTERVAL_MILLIS: z.coerce.number().default(10000),
-	OTEL_EXPORT_TIMEOUT_MILLIS: z.coerce.number().default(30000),
+	OTEL_METRIC_EXPORT_INTERVAL_MILLIS: z.coerce.number().default(30000),
+	OTEL_EXPORT_TIMEOUT_MILLIS: z.coerce.number().default(10000),
 });
 
 const _safeEnv = envSchema.safeParse(process.env);
