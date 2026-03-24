@@ -42,11 +42,11 @@ The service uses BullMQ for reliable job processing with Redis as the message br
 - **Job Queue System** – Reliable async job processing with BullMQ
 - **Automatic Retries** – Failed jobs are retried with configurable attempts
 - **Concurrent Processing** – Multiple workers handle jobs in parallel
-- **Structured Logging** – Detailed logs with Pino for debugging and monitoring
+- **OpenTelemetry Logs** – Structured logs exported to an OTLP collector
 - **Cloud-Init Support** – VMs are configured with cloud-init for SSH access
 - **Network IP Management** – Automatic IP allocation and deallocation
 - **Type-Safe API** – Proxmox API types generated from OpenAPI spec
-- **Prometheus Metrics** – Built-in metrics endpoint for monitoring and alerting
+- **OpenTelemetry Metrics** – Periodic OTLP metric export to a collector
 
 ## 🚀 Getting Started
 
@@ -90,18 +90,17 @@ DATABASE_URL=postgresql://user:password@localhost:5432/yuzu
 # Redis
 REDIS_URL=redis://localhost:6379
 
-# Logging (optional)
-LOG_PRETTY=true
-
-# Prometheus Metrics (optional, default: 9090)
-METRICS_PORT=9090
-
-# Loki Logging (optional)
-LOKI_ENABLED=false
-LOKI_HOST=http://localhost:3100
-LOKI_LABELS=app=yuzu,env=development
-# LOKI_BASIC_AUTH_USER=your-username
-# LOKI_BASIC_AUTH_PASSWORD=your-password
+# OpenTelemetry / OTLP (optional)
+OTEL_SERVICE_NAME=yuzu
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+# OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://localhost:4318/v1/logs
+# OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=grpc
+# OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://localhost:4318/v1/metrics
+# OTEL_EXPORTER_OTLP_METRICS_PROTOCOL=grpc
+# OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer token
+OTEL_METRIC_EXPORT_INTERVAL_MILLIS=10000
+OTEL_EXPORT_TIMEOUT_MILLIS=30000
 ```
 
 ### Database Setup
@@ -137,8 +136,8 @@ yuzu/
 │   │   └── prisma/
 │   │       └── schema.prisma # Database schema
 │   ├── env/                  # Environment variable validation (Zod)
-│   ├── logger/               # Pino logger configuration
-│   ├── metrics/              # Prometheus metrics & HTTP server
+│   ├── logger/               # OpenTelemetry-backed logger facade
+│   ├── metrics/              # OpenTelemetry-backed metric instruments
 │   ├── pve/                  # Proxmox VE API integration
 │   │   ├── api.ts            # OpenAPI client setup
 │   │   ├── qemu.ts           # QEMU VM operations
@@ -155,16 +154,9 @@ yuzu/
 └── prisma.config.ts
 ```
 
-## 📊 Prometheus Metrics
+## 📊 OpenTelemetry Metrics
 
-Yuzu exposes Prometheus metrics at `http://localhost:9090/metrics` (configurable via `METRICS_PORT`).
-
-### Available Endpoints
-
-| Endpoint   | Description                       |
-| ---------- | --------------------------------- |
-| `/metrics` | Prometheus metrics in text format |
-| `/health`  | Health check endpoint             |
+Yuzu exports metrics to an OTLP collector over either HTTP or gRPC. With `http/protobuf` it defaults to `http://localhost:4318/v1/metrics`. With `grpc` it uses the collector endpoint directly, which is commonly `http://localhost:4317`.
 
 ### Available Metrics
 
@@ -182,53 +174,27 @@ Yuzu exposes Prometheus metrics at `http://localhost:9090/metrics` (configurable
 | `yuzu_pve_api_calls_total`             | Counter   | Total number of PVE API calls                          |
 | `yuzu_pve_api_call_duration_seconds`   | Histogram | Duration of PVE API calls                              |
 
-Default Node.js/Bun metrics (CPU, memory, event loop) are also collected.
-
 For dashboards, logs, and tracing guidance, see `docs/observability.md`.
 
-## 📝 Loki Integration
+## 📝 OpenTelemetry Logs
 
-Yuzu supports sending logs to Grafana Loki for centralized log aggregation. When enabled, logs are sent to both stdout and Loki simultaneously.
+Yuzu exports logs to an OTLP collector over either HTTP or gRPC. With `http/protobuf` it defaults to `http://localhost:4318/v1/logs`. With `grpc` it uses the collector endpoint directly, commonly `http://localhost:4317`.
 
 ### Configuration
 
-Set the following environment variables to enable Loki:
+Set the following environment variables to configure OTLP log export:
 
 ```env
-LOKI_ENABLED=true
-LOKI_HOST=http://localhost:3100
-LOKI_LABELS=app=yuzu,env=production
-```
-
-For authenticated Loki instances:
-
-```env
-LOKI_BASIC_AUTH_USER=your-username
-LOKI_BASIC_AUTH_PASSWORD=your-password
+OTEL_SERVICE_NAME=yuzu
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+# OTEL_EXPORTER_OTLP_LOGS_HEADERS=authorization=Bearer token
 ```
 
 ### Grafana Dashboard
 
-With Prometheus metrics and Loki logs, you can create dashboards that correlate metrics with log events. Use the following LogQL query to filter logs:
+With OTLP logs and metrics flowing into your collector, you can route them to Grafana-compatible backends such as Loki, Tempo, Mimir, or any OpenTelemetry-supported sink.
 
-```logql
-{app="yuzu"} |= "error"
-```
-
-Example Prometheus alert rule that links to logs:
-
-```yaml
-groups:
-  - name: yuzu-alerts
-    rules:
-      - alert: HighErrorRate
-        expr: rate(yuzu_log_errors_total[5m]) > 0.1
-        labels:
-          severity: warning
-        annotations:
-          summary: "High error rate in Yuzu"
-          dashboard: "http://grafana/explore?expr={app=\"yuzu\"} |= \"error\""
-```
+For deployment details, see `docs/observability.md`.
 
 ## 🔧 Queue Workers
 

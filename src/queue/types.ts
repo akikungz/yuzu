@@ -4,51 +4,51 @@
  */
 
 export interface ProvisionInstanceJobData {
-  instanceId: number;
-  userId: number;
+	instanceId: number;
+	userId: number;
 }
 
 export interface DeprovisionInstanceJobData {
-  instanceId: number;
-  userId: number;
+	instanceId: number;
+	userId: number;
 }
 
 export interface ToggleInstanceStatusJobData {
-  instanceId: number;
-  userId: number;
-  status: "START" | "STOP" | "RESTART";
+	instanceId: number;
+	userId: number;
+	status: "START" | "STOP" | "RESTART";
 }
 
 /**
  * Step result for tracking individual operation performance
  */
 export interface JobStepResult {
-  step: string;
-  duration: number;
-  success: boolean;
-  details?: Record<string, unknown>;
+	step: string;
+	duration: number;
+	success: boolean;
+	details?: Record<string, unknown>;
 }
 
 export interface ProvisionInstanceJobResult {
-  instanceId: number;
-  status: 'success' | 'failed';
-  message: string;
-  duration?: number;
-  steps?: JobStepResult[];
+	instanceId: number;
+	status: "success" | "failed";
+	message: string;
+	duration?: number;
+	steps?: JobStepResult[];
 }
 
 export interface DeprovisionInstanceJobResult {
-  instanceId: number;
-  status: 'success' | 'failed';
-  message: string;
-  duration?: number;
-  steps?: JobStepResult[];
+	instanceId: number;
+	status: "success" | "failed";
+	message: string;
+	duration?: number;
+	steps?: JobStepResult[];
 }
 
 export interface ToggleInstanceStatusJobResult {
-  instanceId: number;
-  status: 'success' | 'failed';
-  message: string;
-  duration?: number;
-  steps?: JobStepResult[];
+	instanceId: number;
+	status: "success" | "failed";
+	message: string;
+	duration?: number;
+	steps?: JobStepResult[];
 }
