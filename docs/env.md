@@ -25,20 +25,24 @@ These variables are required in all environments.
 
 These variables are optional and have defaults when omitted.
 
-- `LOG_PRETTY` — Pretty-print logs. Default: `false`.
-- `METRICS_PORT` — Prometheus metrics port. Default: `9090`.
-
-### Loki logging (optional)
-
-Enable and configure Loki log shipping.
-
-- `LOKI_ENABLED` — Enable Loki logging. Default: `false`.
-- `LOKI_HOST` — Loki base URL. Default: `http://localhost:3100`.
-- `LOKI_LABELS` — Comma-separated labels. Default: `app=yuzu`.
-- `LOKI_BASIC_AUTH_USER` — Basic auth username (optional).
-- `LOKI_BASIC_AUTH_PASSWORD` — Basic auth password (optional).
+- `OTEL_SERVICE_NAME` — Service name attached to exported telemetry. Default: `yuzu`.
+- `OTEL_EXPORTER_OTLP_ENDPOINT` — Base OTLP HTTP endpoint for the collector. Default: `http://localhost:4318`.
+- `OTEL_EXPORTER_OTLP_PROTOCOL` — Shared OTLP transport. Allowed: `http/protobuf`, `http`, `grpc`. Default: `http/protobuf`.
+- `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` — Optional full override for the logs endpoint.
+- `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL` — Optional protocol override for logs only.
+- `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` — Optional full override for the metrics endpoint.
+- `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL` — Optional protocol override for metrics only.
+- `OTEL_EXPORTER_OTLP_USERNAME` — Optional shared username for OTLP Basic authentication.
+- `OTEL_EXPORTER_OTLP_PASSWORD` — Optional shared password for OTLP Basic authentication.
+- `OTEL_EXPORTER_OTLP_LOGS_USERNAME` — Optional username override for logs only.
+- `OTEL_EXPORTER_OTLP_LOGS_PASSWORD` — Optional password override for logs only.
+- `OTEL_EXPORTER_OTLP_METRICS_USERNAME` — Optional username override for metrics only.
+- `OTEL_EXPORTER_OTLP_METRICS_PASSWORD` — Optional password override for metrics only.
+- `OTEL_METRIC_EXPORT_INTERVAL_MILLIS` — Metric push interval in milliseconds. Default: `10000`.
+- `OTEL_EXPORT_TIMEOUT_MILLIS` — OTLP export timeout in milliseconds. Default: `30000`.
 
 ## Notes
 
 - The runtime validates these variables using Zod. If a required value is missing or invalid, Yuzu will exit with an error.
+- Logs and metrics are exported to an OTLP collector; Yuzu no longer exposes a Prometheus scrape endpoint itself.
 - The recommended starting point is `.env.example`, which includes inline example values.
