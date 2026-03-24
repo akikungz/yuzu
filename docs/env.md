@@ -32,9 +32,12 @@ These variables are optional and have defaults when omitted.
 - `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL` — Optional protocol override for logs only.
 - `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` — Optional full override for the metrics endpoint.
 - `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL` — Optional protocol override for metrics only.
-- `OTEL_EXPORTER_OTLP_HEADERS` — Optional comma-separated headers applied to OTLP exports.
-- `OTEL_EXPORTER_OTLP_LOGS_HEADERS` — Optional comma-separated headers applied only to log exports.
-- `OTEL_EXPORTER_OTLP_METRICS_HEADERS` — Optional comma-separated headers applied only to metric exports.
+- `OTEL_EXPORTER_OTLP_USERNAME` — Optional shared username for OTLP Basic authentication.
+- `OTEL_EXPORTER_OTLP_PASSWORD` — Optional shared password for OTLP Basic authentication.
+- `OTEL_EXPORTER_OTLP_LOGS_USERNAME` — Optional username override for logs only.
+- `OTEL_EXPORTER_OTLP_LOGS_PASSWORD` — Optional password override for logs only.
+- `OTEL_EXPORTER_OTLP_METRICS_USERNAME` — Optional username override for metrics only.
+- `OTEL_EXPORTER_OTLP_METRICS_PASSWORD` — Optional password override for metrics only.
 - `OTEL_METRIC_EXPORT_INTERVAL_MILLIS` — Metric push interval in milliseconds. Default: `10000`.
 - `OTEL_EXPORT_TIMEOUT_MILLIS` — OTLP export timeout in milliseconds. Default: `30000`.
 

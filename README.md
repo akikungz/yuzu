@@ -98,7 +98,8 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 # OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=grpc
 # OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://localhost:4318/v1/metrics
 # OTEL_EXPORTER_OTLP_METRICS_PROTOCOL=grpc
-# OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer token
+# OTEL_EXPORTER_OTLP_USERNAME=collector-user
+# OTEL_EXPORTER_OTLP_PASSWORD=collector-pass
 OTEL_METRIC_EXPORT_INTERVAL_MILLIS=10000
 OTEL_EXPORT_TIMEOUT_MILLIS=30000
 ```
@@ -187,7 +188,8 @@ Set the following environment variables to configure OTLP log export:
 ```env
 OTEL_SERVICE_NAME=yuzu
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-# OTEL_EXPORTER_OTLP_LOGS_HEADERS=authorization=Bearer token
+# OTEL_EXPORTER_OTLP_USERNAME=collector-user
+# OTEL_EXPORTER_OTLP_PASSWORD=collector-pass
 ```
 
 ### Grafana Dashboard

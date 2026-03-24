@@ -99,19 +99,13 @@ function createLogExporter() {
 	if (protocol === "grpc") {
 		return new OTLPGrpcLogExporter({
 			url,
-			metadata: createMetadata(
-				env.OTEL_EXPORTER_OTLP_HEADERS,
-				env.OTEL_EXPORTER_OTLP_LOGS_HEADERS,
-			),
+			metadata: createMetadata("logs"),
 		});
 	}
 
 	return new OTLPLogExporter({
 		url,
-		headers: parseHeaders(
-			env.OTEL_EXPORTER_OTLP_HEADERS,
-			env.OTEL_EXPORTER_OTLP_LOGS_HEADERS,
-		),
+		headers: createAuthHeaders("logs"),
 	});
 }
 
@@ -122,49 +116,54 @@ function createMetricExporter() {
 	if (protocol === "grpc") {
 		return new OTLPGrpcMetricExporter({
 			url,
-			metadata: createMetadata(
-				env.OTEL_EXPORTER_OTLP_HEADERS,
-				env.OTEL_EXPORTER_OTLP_METRICS_HEADERS,
-			),
+			metadata: createMetadata("metrics"),
 		});
 	}
 
 	return new OTLPMetricExporter({
 		url,
-		headers: parseHeaders(
-			env.OTEL_EXPORTER_OTLP_HEADERS,
-			env.OTEL_EXPORTER_OTLP_METRICS_HEADERS,
-		),
+		headers: createAuthHeaders("metrics"),
 	});
 }
 
-function parseHeaders(...headerSets: Array<string | undefined>) {
-	return headerSets.reduce<Record<string, string>>((acc, headerSet) => {
-		if (!headerSet) {
-			return acc;
-		}
+function createAuthHeaders(signal: "logs" | "metrics"): Record<string, string> {
+	const credentials = resolveCredentials(signal);
+	if (!credentials) {
+		return {};
+	}
 
-		for (const pair of headerSet.split(",")) {
-			const [rawKey, ...rawValue] = pair.split("=");
-			const key = rawKey?.trim();
-			const value = rawValue.join("=").trim();
-
-			if (key && value) {
-				acc[key] = value;
-			}
-		}
-
-		return acc;
-	}, {});
+	return {
+		authorization: `Basic ${Buffer.from(
+			`${credentials.username}:${credentials.password}`,
+		).toString("base64")}`,
+	};
 }
 
-function createMetadata(...headerSets: Array<string | undefined>) {
+function createMetadata(signal: "logs" | "metrics") {
 	const metadata = new Metadata();
-	const headers = parseHeaders(...headerSets);
+	const headers = createAuthHeaders(signal);
 
 	for (const [key, value] of Object.entries(headers)) {
 		metadata.set(key, value);
 	}
 
 	return metadata;
+}
+
+function resolveCredentials(signal: "logs" | "metrics") {
+	const username =
+		signal === "logs"
+			? env.OTEL_EXPORTER_OTLP_LOGS_USERNAME ?? env.OTEL_EXPORTER_OTLP_USERNAME
+			: env.OTEL_EXPORTER_OTLP_METRICS_USERNAME ?? env.OTEL_EXPORTER_OTLP_USERNAME;
+
+	const password =
+		signal === "logs"
+			? env.OTEL_EXPORTER_OTLP_LOGS_PASSWORD ?? env.OTEL_EXPORTER_OTLP_PASSWORD
+			: env.OTEL_EXPORTER_OTLP_METRICS_PASSWORD ?? env.OTEL_EXPORTER_OTLP_PASSWORD;
+
+	if (!username || !password) {
+		return undefined;
+	}
+
+	return { username, password };
 }
