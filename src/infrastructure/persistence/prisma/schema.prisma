@@ -16,7 +16,7 @@ model User {
   emailVerified Boolean       @default(false)
   image         String?
   createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  updatedAt     DateTime      @default(now()) @updatedAt
   accounts      Account[]
   platformUser  PlatformUser?
   sessions      Session[]
@@ -29,7 +29,7 @@ model Session {
   expiresAt DateTime
   token     String   @unique
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
   ipAddress String?
   userAgent String?
   userId    String
@@ -52,7 +52,7 @@ model Account {
   scope                 String?
   password              String?
   createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  updatedAt             DateTime  @default(now()) @updatedAt
   user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
@@ -65,7 +65,7 @@ model Verification {
   value      String
   expiresAt  DateTime
   createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  updatedAt  DateTime @default(now()) @updatedAt
 
   @@index([identifier])
   @@map("verification")
@@ -76,14 +76,13 @@ model PlatformUser {
   userId                   String                    @unique
   role                     PlatformRole              @default(STUDENT)
   createdAt                DateTime                  @default(now())
-  updatedAt                DateTime                  @updatedAt
+  updatedAt                DateTime                  @default(now()) @updatedAt
   extendedRequests         ExtendedRequest[]         @relation("Requester")
   extendedReviews          ExtendedRequest[]         @relation("Reviewer")
   extendedRequestAuditLogs ExtendedRequestAuditLog[]
   instances                Instance[]
   instanceAuditLogs        InstanceAuditLog[]
   platform_file            PlatformFile[]
-  platformFilePermissions  PlatformFilePermission[]
   platformSSHKeys          PlatformSSHKey[]
   user                     User                      @relation(fields: [userId], references: [id])
   requestsAsRequester      Request[]                 @relation("Requester")
@@ -100,7 +99,7 @@ model InstructorSearch {
   email          String   @unique
   havePlatformId Boolean  @default(false)
   createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  updatedAt      DateTime @default(now()) @updatedAt
 
   @@map("instructor_search")
 }
@@ -112,7 +111,7 @@ model Course {
   description     String?
   isActive        Boolean          @default(true)
   createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  updatedAt       DateTime         @default(now()) @updatedAt
   courseOfferings CourseOffering[]
   instructors     PlatformUser[]   @relation("CourseInstructors")
 
@@ -127,7 +126,7 @@ model Semester {
   endDate          DateTime
   isCurrent        Boolean           @default(false)
   createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  updatedAt        DateTime          @default(now()) @updatedAt
   courseOfferings  CourseOffering[]
   extendedRequests ExtendedRequest[]
   instances        Instance[]
@@ -141,7 +140,7 @@ model CourseOffering {
   courseId   Int
   semesterId Int
   createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
+  updatedAt  DateTime   @default(now()) @updatedAt
   course     Course     @relation(fields: [courseId], references: [id])
   semester   Semester   @relation(fields: [semesterId], references: [id])
   instances  Instance[]
@@ -157,7 +156,7 @@ model PVENode {
   name         String        @unique
   ipAddress    String        @unique
   createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  updatedAt    DateTime      @default(now()) @updatedAt
   pvetemplates PVETemplate[]
   pveVMs       PVEVM[]
 
@@ -171,8 +170,9 @@ model PVENetwork {
   subnet        String
   gateway       String
   bridge        String
+  vlanTag       Int
   createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  updatedAt     DateTime       @default(now()) @updatedAt
   pveNetworkIPs PVENetworkIP[]
 
   @@unique([name, subnet])
@@ -185,7 +185,7 @@ model PVENetworkIP {
   isAllocated  Boolean    @default(false)
   pveNetworkId Int
   createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  updatedAt    DateTime   @default(now()) @updatedAt
   pveNetwork   PVENetwork @relation(fields: [pveNetworkId], references: [id], onDelete: Cascade)
   pveVMs       PVEVM?
 
@@ -201,7 +201,8 @@ model PVETemplate {
   type        PVEVMType
   pveNodeId   Int
   createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  updatedAt   DateTime   @default(now()) @updatedAt
+  enabled     Boolean    @default(true)
   instances   Instance[]
   pveNode     PVENode    @relation(fields: [pveNodeId], references: [id])
   requests    Request[]
@@ -219,7 +220,7 @@ model PVEVM {
   pveNodeId      Int
   pveNetworkIPId Int?          @unique
   createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  updatedAt      DateTime      @default(now()) @updatedAt
   instances      Instance[]
   pveNetworkIP   PVENetworkIP? @relation(fields: [pveNetworkIPId], references: [id])
   pveNode        PVENode       @relation(fields: [pveNodeId], references: [id])
@@ -242,7 +243,7 @@ model Instance {
   provisionStatus        InstanceProvisionStatus @default(NOT_STARTED)
   provisionError         String?
   createdAt              DateTime                @default(now())
-  updatedAt              DateTime                @updatedAt
+  updatedAt              DateTime                @default(now()) @updatedAt
   semesterId             Int?
   defaultPassword        String?
   extendedRequests       ExtendedRequest[]
@@ -263,11 +264,11 @@ model Instance {
 model InstanceReverseProxy {
   id          Int              @id @default(autoincrement())
   targetPort  Int
-  type        ReverseProxyType @default(HTTPS)
+  type        ReverseProxyType @default(TCP)
   description String?
   instanceId  Int
   createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  updatedAt   DateTime         @default(now()) @updatedAt
   instance    Instance         @relation(fields: [instanceId], references: [id], onDelete: Cascade)
 
   @@unique([instanceId, targetPort])
@@ -302,7 +303,7 @@ model Request {
   status           ApprovalStatus    @default(PENDING)
   reason           String?
   createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  updatedAt        DateTime          @default(now()) @updatedAt
   instance         Instance?
   courseOffering   CourseOffering    @relation(fields: [courseOfferingId], references: [id])
   pveTemplate      PVETemplate       @relation(fields: [pveTemplateId], references: [id])
@@ -326,7 +327,7 @@ model ExtendedRequest {
   status                   ApprovalStatus            @default(PENDING)
   reason                   String?
   createdAt                DateTime                  @default(now())
-  updatedAt                DateTime                  @updatedAt
+  updatedAt                DateTime                  @default(now()) @updatedAt
   nextSemester             Semester                  @relation(fields: [nextSemesterId], references: [id])
   requester                PlatformUser              @relation("Requester", fields: [requesterId], references: [id])
   reviewer                 PlatformUser?             @relation("Reviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
@@ -372,7 +373,7 @@ model PlatformSSHKey {
   publicKey String
   ownerId   Int
   createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  updatedAt DateTime     @default(now()) @updatedAt
   owner     PlatformUser @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
   @@unique([ownerId, name])
@@ -381,51 +382,23 @@ model PlatformSSHKey {
 }
 
 model PlatformFile {
-  id                      String                   @id @default(cuid())
-  name                    String
-  type                    PlatformFileType
-  sizeBytes               Int                      @default(0)
-  visibility              PlatformFileViewerRole   @default(OWNER)
-  parentId                String?
-  platformUserId          Int
-  isPublic                Boolean                  @default(false)
-  createdAt               DateTime                 @default(now())
-  updatedAt               DateTime                 @updatedAt
-  parent                  PlatformFile?            @relation("ParentChild", fields: [parentId], references: [id], onDelete: Cascade)
-  children                PlatformFile[]           @relation("ParentChild")
-  platform_user           PlatformUser             @relation(fields: [platformUserId], references: [id], onDelete: Cascade)
-  platformFilePermissions PlatformFilePermission[]
-  platformFileVersions    PlatformFileVersion[]
+  id              String           @id @default(cuid())
+  name            String
+  type            PlatformFileType
+  sizeBytes       Int              @default(0)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @default(now()) @updatedAt
+  deletedAt       DateTime?
+  description     String?
+  extension       String?
+  latestVersionId Int?             @unique
+  mimeType        String?
+  ownerId         Int
+  trashedAt       DateTime?
+  platform_user   PlatformUser     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
-  @@index([parentId])
-  @@index([platformUserId])
+  @@index([ownerId])
   @@map("platform_file")
-}
-
-model PlatformFileVersion {
-  id             Int          @id @default(autoincrement())
-  platformFileId String
-  versionNumber  Int
-  sizeBytes      Int
-  storagePath    String
-  createdAt      DateTime     @default(now())
-  platformFile   PlatformFile @relation(fields: [platformFileId], references: [id], onDelete: Cascade)
-
-  @@unique([platformFileId, versionNumber])
-  @@map("platform_file_version")
-}
-
-model PlatformFilePermission {
-  id             Int                    @id @default(autoincrement())
-  platformFileId String
-  platformUserId Int
-  permission     PlatformFileViewerRole @default(VIEWER)
-  platformFile   PlatformFile           @relation(fields: [platformFileId], references: [id], onDelete: Cascade)
-  platformUser   PlatformUser           @relation(fields: [platformUserId], references: [id], onDelete: Cascade)
-
-  @@unique([platformFileId, platformUserId])
-  @@index([platformUserId])
-  @@map("platform_file_permission")
 }
 
 enum PlatformRole {
@@ -462,7 +435,6 @@ enum InstanceProvisionStatus {
 }
 
 enum ReverseProxyType {
-  HTTPS
   HTTP
   TCP
 }
@@ -477,10 +449,4 @@ enum ApprovalStatus {
 enum PlatformFileType {
   FILE
   FOLDER
-}
-
-enum PlatformFileViewerRole {
-  VIEWER
-  EDITOR
-  OWNER
 }
