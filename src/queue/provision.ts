@@ -2,6 +2,7 @@ import type { AppLogger } from "@yuzu/application/common/logger";
 import { ProvisionInstanceUseCase } from "@yuzu/application/use-cases/provision-instance";
 import { RedisPlatformCache } from "@yuzu/infrastructure/cache/redis-platform-cache";
 import { env } from "@yuzu/infrastructure/config/env";
+import { RedisResourceLockManager } from "@yuzu/infrastructure/locking/redis-resource-lock-manager";
 import { logger as rootLogger } from "@yuzu/infrastructure/observability/logger";
 import {
 	activeJobsGauge,
@@ -19,15 +20,22 @@ export class ProvisionQueueWorker {
 	private readonly queueName = `${env.NODE_ENV}_provision-instance`;
 	private readonly useCase: ProvisionInstanceUseCase;
 	private readonly worker: Worker;
+	private readonly resourceLockManager: RedisResourceLockManager;
 
 	constructor(
 		private readonly redisConnection: Redis,
 		private readonly prisma: PrismaClient,
 	) {
+		this.resourceLockManager = new RedisResourceLockManager(this.redisConnection, {
+			ttlMs: env.YUZU_RESOURCE_LOCK_TTL_MILLIS,
+			acquireTimeoutMs: env.YUZU_RESOURCE_LOCK_ACQUIRE_TIMEOUT_MILLIS,
+			retryIntervalMs: env.YUZU_RESOURCE_LOCK_RETRY_INTERVAL_MILLIS,
+		});
 		this.useCase = new ProvisionInstanceUseCase(
 			new PrismaInstanceRepository(this.prisma),
 			new DefaultProxmoxGateway(),
 			new RedisPlatformCache(this.redisConnection),
+			this.resourceLockManager,
 		);
 
 		this.worker = new Worker(
@@ -47,12 +55,22 @@ export class ProvisionQueueWorker {
 				}
 
 				const startTime = performance.now();
+				const instanceLockKey = `yuzu:resource:instance:${job.data.instanceId}`;
 
 				try {
-					const result = await this.instanceProvisionJob(
-						job.data.instanceId,
-						job.data.userId,
-						jobLogger,
+					const result = await this.resourceLockManager.withLocks(
+						[instanceLockKey],
+						() =>
+							this.instanceProvisionJob(
+								job.data.instanceId,
+								job.data.userId,
+								jobLogger,
+							),
+						{
+							ttlMs: env.YUZU_RESOURCE_LOCK_TTL_MILLIS,
+							acquireTimeoutMs: env.YUZU_RESOURCE_LOCK_ACQUIRE_TIMEOUT_MILLIS,
+							retryIntervalMs: env.YUZU_RESOURCE_LOCK_RETRY_INTERVAL_MILLIS,
+						},
 					);
 
 					const totalDuration = performance.now() - startTime;
@@ -66,6 +84,7 @@ export class ProvisionQueueWorker {
 						{
 							duration: `${totalDuration.toFixed(2)}ms`,
 							steps: result.steps,
+							instanceLockKey,
 						},
 						"Provision job completed successfully",
 					);
@@ -94,6 +113,7 @@ export class ProvisionQueueWorker {
 							err: { message: error.message, stack: error.stack },
 							duration: `${totalDuration.toFixed(2)}ms`,
 							willRetry,
+							instanceLockKey,
 						},
 						"Provision job failed",
 					);
@@ -114,7 +134,7 @@ export class ProvisionQueueWorker {
 			},
 			{
 				connection: this.redisConnection.options,
-				concurrency: 5,
+				concurrency: env.YUZU_PROVISION_CONCURRENCY,
 				lockDuration: 300000,
 				stalledInterval: 5000,
 				maxStalledCount: 2,
@@ -155,7 +175,10 @@ export class ProvisionQueueWorker {
 		});
 
 		this.worker.on("ready", () => {
-			this.logger.info("Provision queue worker ready");
+			this.logger.info(
+				{ concurrency: env.YUZU_PROVISION_CONCURRENCY },
+				"Provision queue worker ready",
+			);
 		});
 
 		this.worker.on("error", (err) => {

@@ -3,6 +3,8 @@ import { StepTracker } from "@yuzu/application/common/step-tracker";
 import type { InstanceRepository } from "@yuzu/application/ports/instance-repository";
 import type { PlatformCache } from "@yuzu/application/ports/platform-cache";
 import type { ProxmoxGateway } from "@yuzu/application/ports/proxmox-gateway";
+import type { ResourceLockManager } from "@yuzu/application/ports/resource-lock-manager";
+import { env } from "@yuzu/infrastructure/config/env";
 
 export type ToggleAction = "START" | "STOP" | "RESTART";
 
@@ -11,6 +13,7 @@ export class ToggleInstanceStatusUseCase {
 		private readonly repository: InstanceRepository,
 		private readonly proxmox: ProxmoxGateway,
 		private readonly cache: PlatformCache,
+		private readonly resourceLockManager: ResourceLockManager,
 	) {}
 
 	async execute(
@@ -47,57 +50,69 @@ export class ToggleInstanceStatusUseCase {
 			node: pveVm.pveNode.name,
 			hostname: pveVm.hostname,
 		});
+		const vmidLockKey = `yuzu:resource:vmid:${pveVm.vmId}`;
 
-		const currentStatus = await tracker.executeStep(
-			"check-current-status",
-			async () => this.proxmox.getVmStatus(pveVm.pveNode.name, pveVm.vmId),
-			(status) => ({ currentStatus: status }),
-		);
-
-		switch (action) {
-			case "START":
-				await this.handleStart(vmLog, pveVm, currentStatus, tracker);
-				break;
-			case "STOP":
-				await this.handleStop(vmLog, pveVm, currentStatus, tracker);
-				break;
-			case "RESTART":
-				await this.handleRestart(vmLog, pveVm, currentStatus, tracker);
-				break;
-		}
-
-		const instanceStatus = action === "STOP" ? "INACTIVE" : "ACTIVE";
-		const vmStatus = action === "STOP" ? "STOPPED" : "RUNNING";
-
-		await tracker.executeStep(
-			"update-database-status",
+		return this.resourceLockManager.withLocks(
+			[vmidLockKey],
 			async () => {
-				await this.repository.updateToggleStatuses({
-					instanceId,
-					pveVmId: pveVm.id,
-					instanceStatus,
-					vmStatus,
+				const currentStatus = await tracker.executeStep(
+					"check-current-status",
+					async () => this.proxmox.getVmStatus(pveVm.pveNode.name, pveVm.vmId),
+					(status) => ({ currentStatus: status }),
+				);
+
+				switch (action) {
+					case "START":
+						await this.handleStart(vmLog, pveVm, currentStatus, tracker);
+						break;
+					case "STOP":
+						await this.handleStop(vmLog, pveVm, currentStatus, tracker);
+						break;
+					case "RESTART":
+						await this.handleRestart(vmLog, pveVm, currentStatus, tracker);
+						break;
+				}
+
+				const instanceStatus = action === "STOP" ? "INACTIVE" : "ACTIVE";
+				const vmStatus = action === "STOP" ? "STOPPED" : "RUNNING";
+
+				await tracker.executeStep(
+					"update-database-status",
+					async () => {
+						await this.repository.updateToggleStatuses({
+							instanceId,
+							pveVmId: pveVm.id,
+							instanceStatus,
+							vmStatus,
+						});
+					},
+					() => ({ instanceStatus, vmStatus }),
+				);
+
+				await tracker.executeStep("invalidate-cache", async () => {
+					await this.cache.invalidateInstanceCache(userId, instanceId);
 				});
+
+				vmLog.info(
+					{
+						totalSteps: tracker.steps.length,
+						vmid: pveVm.vmId,
+						node: pveVm.pveNode.name,
+						action,
+						finalStatus: vmStatus,
+						vmidLockKey,
+					},
+					`Instance ${action.toLowerCase()} completed successfully`,
+				);
+
+				return { steps: tracker.steps };
 			},
-			() => ({ instanceStatus, vmStatus }),
-		);
-
-		await tracker.executeStep("invalidate-cache", async () => {
-			await this.cache.invalidateInstanceCache(userId, instanceId);
-		});
-
-		vmLog.info(
 			{
-				totalSteps: tracker.steps.length,
-				vmid: pveVm.vmId,
-				node: pveVm.pveNode.name,
-				action,
-				finalStatus: vmStatus,
+				ttlMs: env.YUZU_RESOURCE_LOCK_TTL_MILLIS,
+				acquireTimeoutMs: env.YUZU_RESOURCE_LOCK_ACQUIRE_TIMEOUT_MILLIS,
+				retryIntervalMs: env.YUZU_RESOURCE_LOCK_RETRY_INTERVAL_MILLIS,
 			},
-			`Instance ${action.toLowerCase()} completed successfully`,
 		);
-
-		return { steps: tracker.steps };
 	}
 
 	private async handleStart(

@@ -5,6 +5,7 @@ import {
 } from "@yuzu/application/use-cases/toggle-instance-status";
 import { RedisPlatformCache } from "@yuzu/infrastructure/cache/redis-platform-cache";
 import { env } from "@yuzu/infrastructure/config/env";
+import { RedisResourceLockManager } from "@yuzu/infrastructure/locking/redis-resource-lock-manager";
 import { logger as rootLogger } from "@yuzu/infrastructure/observability/logger";
 import {
 	activeJobsGauge,
@@ -24,15 +25,22 @@ export class ToggleStatusQueueWorker {
 	private readonly queueName = `${env.NODE_ENV}_toggle-instance-status`;
 	private readonly useCase: ToggleInstanceStatusUseCase;
 	private readonly worker: Worker;
+	private readonly resourceLockManager: RedisResourceLockManager;
 
 	constructor(
 		private readonly redisConnection: Redis,
 		private readonly prisma: PrismaClient,
 	) {
+		this.resourceLockManager = new RedisResourceLockManager(this.redisConnection, {
+			ttlMs: env.YUZU_RESOURCE_LOCK_TTL_MILLIS,
+			acquireTimeoutMs: env.YUZU_RESOURCE_LOCK_ACQUIRE_TIMEOUT_MILLIS,
+			retryIntervalMs: env.YUZU_RESOURCE_LOCK_RETRY_INTERVAL_MILLIS,
+		});
 		this.useCase = new ToggleInstanceStatusUseCase(
 			new PrismaInstanceRepository(this.prisma),
 			new DefaultProxmoxGateway(),
 			new RedisPlatformCache(this.redisConnection),
+			this.resourceLockManager,
 		);
 
 		this.worker = new Worker(
@@ -52,13 +60,23 @@ export class ToggleStatusQueueWorker {
 				}
 
 				const startTime = performance.now();
+				const instanceLockKey = `yuzu:resource:instance:${job.data.instanceId}`;
 
 				try {
-					const result = await this.instanceToggleStatusJob(
-						job.data.instanceId,
-						job.data.userId,
-						job.data.status,
-						jobLogger,
+					const result = await this.resourceLockManager.withLocks(
+						[instanceLockKey],
+						() =>
+							this.instanceToggleStatusJob(
+								job.data.instanceId,
+								job.data.userId,
+								job.data.status,
+								jobLogger,
+							),
+						{
+							ttlMs: env.YUZU_RESOURCE_LOCK_TTL_MILLIS,
+							acquireTimeoutMs: env.YUZU_RESOURCE_LOCK_ACQUIRE_TIMEOUT_MILLIS,
+							retryIntervalMs: env.YUZU_RESOURCE_LOCK_RETRY_INTERVAL_MILLIS,
+						},
 					);
 
 					const totalDuration = performance.now() - startTime;
@@ -72,6 +90,7 @@ export class ToggleStatusQueueWorker {
 						{
 							duration: `${totalDuration.toFixed(2)}ms`,
 							steps: result.steps,
+							instanceLockKey,
 						},
 						"Toggle status job completed successfully",
 					);
@@ -100,6 +119,7 @@ export class ToggleStatusQueueWorker {
 							err: { message: error.message, stack: error.stack },
 							duration: `${totalDuration.toFixed(2)}ms`,
 							willRetry,
+							instanceLockKey,
 						},
 						"Toggle status job failed",
 					);
@@ -118,7 +138,7 @@ export class ToggleStatusQueueWorker {
 			},
 			{
 				connection: this.redisConnection.options,
-				concurrency: 10,
+				concurrency: env.YUZU_TOGGLE_STATUS_CONCURRENCY,
 				lockDuration: 120000,
 				stalledInterval: 5000,
 				maxStalledCount: 2,
@@ -159,7 +179,10 @@ export class ToggleStatusQueueWorker {
 		});
 
 		this.worker.on("ready", () => {
-			this.logger.info("Toggle status queue worker ready");
+			this.logger.info(
+				{ concurrency: env.YUZU_TOGGLE_STATUS_CONCURRENCY },
+				"Toggle status queue worker ready",
+			);
 		});
 
 		this.worker.on("error", (err) => {

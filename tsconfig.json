@@ -27,9 +27,9 @@
 		"noPropertyAccessFromIndexSignature": false,
 
 		// Path aliases
-		"baseUrl": ".",
 		"paths": {
-			"@yuzu/*": ["src/*"]
+			"*": ["./*"],
+			"@yuzu/*": ["./src/*"]
 		}
 	}
 }

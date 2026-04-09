@@ -2,6 +2,7 @@ import type { AppLogger } from "@yuzu/application/common/logger";
 import { DeprovisionInstanceUseCase } from "@yuzu/application/use-cases/deprovision-instance";
 import { RedisPlatformCache } from "@yuzu/infrastructure/cache/redis-platform-cache";
 import { env } from "@yuzu/infrastructure/config/env";
+import { RedisResourceLockManager } from "@yuzu/infrastructure/locking/redis-resource-lock-manager";
 import { logger as rootLogger } from "@yuzu/infrastructure/observability/logger";
 import {
 	activeJobsGauge,
@@ -19,15 +20,22 @@ export class DeprovisionQueueWorker {
 	private readonly queueName = `${env.NODE_ENV}_deprovision-instance`;
 	private readonly useCase: DeprovisionInstanceUseCase;
 	private readonly worker: Worker;
+	private readonly resourceLockManager: RedisResourceLockManager;
 
 	constructor(
 		private readonly redisConnection: Redis,
 		private readonly prisma: PrismaClient,
 	) {
+		this.resourceLockManager = new RedisResourceLockManager(this.redisConnection, {
+			ttlMs: env.YUZU_RESOURCE_LOCK_TTL_MILLIS,
+			acquireTimeoutMs: env.YUZU_RESOURCE_LOCK_ACQUIRE_TIMEOUT_MILLIS,
+			retryIntervalMs: env.YUZU_RESOURCE_LOCK_RETRY_INTERVAL_MILLIS,
+		});
 		this.useCase = new DeprovisionInstanceUseCase(
 			new PrismaInstanceRepository(this.prisma),
 			new DefaultProxmoxGateway(),
 			new RedisPlatformCache(this.redisConnection),
+			this.resourceLockManager,
 		);
 
 		this.worker = new Worker(
@@ -47,12 +55,22 @@ export class DeprovisionQueueWorker {
 				}
 
 				const startTime = performance.now();
+				const instanceLockKey = `yuzu:resource:instance:${job.data.instanceId}`;
 
 				try {
-					const result = await this.instanceDeprovisionJob(
-						job.data.instanceId,
-						job.data.userId,
-						jobLogger,
+					const result = await this.resourceLockManager.withLocks(
+						[instanceLockKey],
+						() =>
+							this.instanceDeprovisionJob(
+								job.data.instanceId,
+								job.data.userId,
+								jobLogger,
+							),
+						{
+							ttlMs: env.YUZU_RESOURCE_LOCK_TTL_MILLIS,
+							acquireTimeoutMs: env.YUZU_RESOURCE_LOCK_ACQUIRE_TIMEOUT_MILLIS,
+							retryIntervalMs: env.YUZU_RESOURCE_LOCK_RETRY_INTERVAL_MILLIS,
+						},
 					);
 
 					const totalDuration = performance.now() - startTime;
@@ -66,6 +84,7 @@ export class DeprovisionQueueWorker {
 						{
 							duration: `${totalDuration.toFixed(2)}ms`,
 							steps: result.steps,
+							instanceLockKey,
 						},
 						"Deprovision job completed successfully",
 					);
@@ -94,6 +113,7 @@ export class DeprovisionQueueWorker {
 							err: { message: error.message, stack: error.stack },
 							duration: `${totalDuration.toFixed(2)}ms`,
 							willRetry,
+							instanceLockKey,
 						},
 						"Deprovision job failed",
 					);
@@ -120,7 +140,7 @@ export class DeprovisionQueueWorker {
 			},
 			{
 				connection: this.redisConnection.options,
-				concurrency: 5,
+				concurrency: env.YUZU_DEPROVISION_CONCURRENCY,
 				lockDuration: 180000,
 				stalledInterval: 5000,
 				maxStalledCount: 2,
@@ -161,7 +181,10 @@ export class DeprovisionQueueWorker {
 		});
 
 		this.worker.on("ready", () => {
-			this.logger.info("Deprovision queue worker ready");
+			this.logger.info(
+				{ concurrency: env.YUZU_DEPROVISION_CONCURRENCY },
+				"Deprovision queue worker ready",
+			);
 		});
 
 		this.worker.on("error", (err) => {

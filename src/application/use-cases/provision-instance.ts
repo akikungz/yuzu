@@ -5,12 +5,15 @@ import { StepTracker } from "@yuzu/application/common/step-tracker";
 import type { InstanceRepository } from "@yuzu/application/ports/instance-repository";
 import type { PlatformCache } from "@yuzu/application/ports/platform-cache";
 import type { ProxmoxGateway } from "@yuzu/application/ports/proxmox-gateway";
+import type { ResourceLockManager } from "@yuzu/application/ports/resource-lock-manager";
+import { env } from "@yuzu/infrastructure/config/env";
 
 export class ProvisionInstanceUseCase {
 	constructor(
 		private readonly repository: InstanceRepository,
 		private readonly proxmox: ProxmoxGateway,
 		private readonly cache: PlatformCache,
+		private readonly resourceLockManager: ResourceLockManager,
 	) {}
 
 	async execute(instanceId: number, userId: number, parentLogger: AppLogger) {
@@ -60,113 +63,143 @@ export class ProvisionInstanceUseCase {
 		provisionLog.info("VM resources allocated, starting clone operation");
 
 		const hostname = this.generateRandomHostname(instanceId);
-
-		await tracker.executeStep(
-			"clone-vm",
-			async () => {
-				const upid = await this.proxmox.cloneVm({
-					sourceNode: template.pveNode.name,
-					templateVmid: template.vmId,
-					newVmid: targetId,
-					targetNode,
-					hostname,
-				});
-				await this.proxmox.waitForTask(template.pveNode.name, upid);
-				return upid;
-			},
-			(upid) => ({ upid }),
+		const vmidLockKey = `yuzu:resource:vmid:${targetId}`;
+		provisionLog.info(
+			{ vmidLockKey },
+			"Acquiring VMID resource lock for provision critical section",
 		);
 
-		const sshPublicKeys = await tracker.executeStep(
-			"fetch-owner-ssh-keys",
-			async () => this.repository.findOwnerSshKeys(instance.platformUserId),
-			(keys) => ({ keyCount: keys.length }),
-		);
-
-		const pickedIp = await tracker.executeStep(
-			"allocate-ip",
+		const {
+			pickedIp,
+			pveVm,
+			defaultUserCredentials,
+			ipLog,
+		} = await this.resourceLockManager.withLocks(
+			[vmidLockKey],
 			async () => {
-				const ip = await this.repository.findAvailableNetworkIp();
-				if (!ip) {
-					throw new Error("No available IP addresses for allocation");
-				}
-				return ip;
-			},
-			(ip) => ({ ip: ip.ipAddress, network: ip.pveNetwork.name }),
-		);
-
-		const ipLog = provisionLog.child({
-			allocatedIp: pickedIp.ipAddress,
-			network: pickedIp.pveNetwork.name,
-		});
-
-		const pveVm = await tracker.executeStep("create-pvevm-record", async () => {
-			return this.repository.upsertPveVm({
-				vmId: targetId,
-				hostname,
-				targetNode,
-				networkIpId: pickedIp.id,
-			});
-		});
-
-		await tracker.executeStep(
-			"resize-disk",
-			async () => {
-				const upid = await this.proxmox.resizeDisk(
-					targetNode,
-					targetId,
-					instance.diskGB,
+				await tracker.executeStep(
+					"clone-vm",
+					async () => {
+						const upid = await this.proxmox.cloneVm({
+							sourceNode: template.pveNode.name,
+							templateVmid: template.vmId,
+							newVmid: targetId,
+							targetNode,
+							hostname,
+						});
+						await this.proxmox.waitForTask(template.pveNode.name, upid);
+						return upid;
+					},
+					(upid) => ({ upid }),
 				);
-				await this.proxmox.waitForTask(targetNode, upid);
-				return upid;
-			},
-			(upid) => ({ diskGB: instance.diskGB, upid }),
-		);
 
-		const ipConfig = {
-			bridge: pickedIp.pveNetwork.bridge,
-			vlan: parseInt(pickedIp.pveNetwork.name, 10) || 1,
-			ip: `${pickedIp.ipAddress}/${pickedIp.pveNetwork.subnet.split("/")[1]}`,
-			gw: pickedIp.pveNetwork.gateway,
-		};
-		const defaultUserCredentials = {
-			username: "user",
-			password: this.generateRandomPassword(),
-		};
+				const sshPublicKeys = await tracker.executeStep(
+					"fetch-owner-ssh-keys",
+					async () => this.repository.findOwnerSshKeys(instance.platformUserId),
+					(keys) => ({ keyCount: keys.length }),
+				);
 
-		await tracker.executeStep(
-			"configure-vm",
-			async () => {
-				await this.proxmox.configureVm({
-					node: targetNode,
-					vmid: targetId,
-					cpuCores: instance.cpus,
-					memoryMB: instance.memoryMB,
-					credentials: defaultUserCredentials,
-					sshPublicKeys,
-					networkConfig: ipConfig,
+				const pickedIp = await tracker.executeStep(
+					"allocate-ip",
+					async () => {
+						const ip = await this.repository.findAvailableNetworkIp();
+						if (!ip) {
+							throw new Error("No available IP addresses for allocation");
+						}
+						return ip;
+					},
+					(ip) => ({ ip: ip.ipAddress, network: ip.pveNetwork.name }),
+				);
+
+				const ipLog = provisionLog.child({
+					allocatedIp: pickedIp.ipAddress,
+					network: pickedIp.pveNetwork.name,
 				});
-			},
-			() => ({ cpus: instance.cpus, memoryMB: instance.memoryMB, ipConfig }),
-		);
 
-		await tracker.executeStep("update-database-records", async () => {
-			await this.repository.completeProvision({
-				instanceId,
-				pveVmId: pveVm.id,
-				networkIpId: pickedIp.id,
-				defaultPassword: defaultUserCredentials.password,
-			});
-		});
+				const pveVm = await tracker.executeStep(
+					"create-pvevm-record",
+					async () => {
+						return this.repository.upsertPveVm({
+							vmId: targetId,
+							hostname,
+							targetNode,
+							networkIpId: pickedIp.id,
+						});
+					},
+				);
 
-		await tracker.executeStep(
-			"start-vm",
-			async () => {
-				const upid = await this.proxmox.startVm(targetNode, targetId);
-				await this.proxmox.waitForTask(targetNode, upid);
-				return upid;
+				await tracker.executeStep(
+					"resize-disk",
+					async () => {
+						const upid = await this.proxmox.resizeDisk(
+							targetNode,
+							targetId,
+							instance.diskGB,
+						);
+						await this.proxmox.waitForTask(targetNode, upid);
+						return upid;
+					},
+					(upid) => ({ diskGB: instance.diskGB, upid }),
+				);
+
+				const ipConfig = {
+					bridge: pickedIp.pveNetwork.bridge,
+					vlan: parseInt(pickedIp.pveNetwork.name, 10) || 1,
+					ip: `${pickedIp.ipAddress}/${pickedIp.pveNetwork.subnet.split("/")[1]}`,
+					gw: pickedIp.pveNetwork.gateway,
+				};
+				const defaultUserCredentials = {
+					username: "user",
+					password: this.generateRandomPassword(),
+				};
+
+				await tracker.executeStep(
+					"configure-vm",
+					async () => {
+						await this.proxmox.configureVm({
+							node: targetNode,
+							vmid: targetId,
+							cpuCores: instance.cpus,
+							memoryMB: instance.memoryMB,
+							credentials: defaultUserCredentials,
+							sshPublicKeys,
+							networkConfig: ipConfig,
+						});
+					},
+					() => ({ cpus: instance.cpus, memoryMB: instance.memoryMB, ipConfig }),
+				);
+
+				await tracker.executeStep("update-database-records", async () => {
+					await this.repository.completeProvision({
+						instanceId,
+						pveVmId: pveVm.id,
+						networkIpId: pickedIp.id,
+						defaultPassword: defaultUserCredentials.password,
+					});
+				});
+
+				await tracker.executeStep(
+					"start-vm",
+					async () => {
+						const upid = await this.proxmox.startVm(targetNode, targetId);
+						await this.proxmox.waitForTask(targetNode, upid);
+						return upid;
+					},
+					(upid) => ({ upid }),
+				);
+
+				return {
+					pickedIp,
+					pveVm,
+					defaultUserCredentials,
+					ipLog,
+				};
 			},
-			(upid) => ({ upid }),
+			{
+				ttlMs: env.YUZU_RESOURCE_LOCK_TTL_MILLIS,
+				acquireTimeoutMs: env.YUZU_RESOURCE_LOCK_ACQUIRE_TIMEOUT_MILLIS,
+				retryIntervalMs: env.YUZU_RESOURCE_LOCK_RETRY_INTERVAL_MILLIS,
+			},
 		);
 
 		try {

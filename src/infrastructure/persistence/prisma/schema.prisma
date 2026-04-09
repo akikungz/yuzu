@@ -112,10 +112,11 @@ model Course {
   isActive        Boolean          @default(true)
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @default(now()) @updatedAt
+  isProjectBased  Boolean          @default(false)
   courseOfferings CourseOffering[]
   instructors     PlatformUser[]   @relation("CourseInstructors")
 
-  @@index([code, isActive])
+  @@index([code, isActive, isProjectBased])
   @@map("course")
 }
 
@@ -124,14 +125,12 @@ model Semester {
   name             String
   startDate        DateTime
   endDate          DateTime
-  isCurrent        Boolean           @default(false)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @default(now()) @updatedAt
   courseOfferings  CourseOffering[]
   extendedRequests ExtendedRequest[]
   instances        Instance[]
 
-  @@index([isCurrent])
   @@map("semester")
 }
 
@@ -256,7 +255,6 @@ model Instance {
   instanceAuditLogs      InstanceAuditLog[]
   instanceReverseProxies InstanceReverseProxy[]
 
-  @@unique([platformUserId, courseOfferingId])
   @@index([status, provisionStatus, platformUserId, pveTemplateId, semesterId])
   @@map("instance")
 }
@@ -311,7 +309,6 @@ model Request {
   reviewer         PlatformUser?     @relation("Reviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
   requestAuditLogs RequestAuditLog[]
 
-  @@unique([requesterId, courseOfferingId])
   @@index([requesterId, status, courseOfferingId])
   @@map("request")
 }

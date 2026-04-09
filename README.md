@@ -90,6 +90,14 @@ DATABASE_URL=postgresql://user:password@localhost:5432/yuzu
 # Redis
 REDIS_URL=redis://localhost:6379
 
+# Queue worker concurrency
+YUZU_PROVISION_CONCURRENCY=5
+YUZU_DEPROVISION_CONCURRENCY=5
+YUZU_TOGGLE_STATUS_CONCURRENCY=10
+YUZU_RESOURCE_LOCK_TTL_MILLIS=900000
+YUZU_RESOURCE_LOCK_ACQUIRE_TIMEOUT_MILLIS=30000
+YUZU_RESOURCE_LOCK_RETRY_INTERVAL_MILLIS=250
+
 # OpenTelemetry / OTLP (optional)
 OTEL_SERVICE_NAME=yuzu
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
@@ -199,6 +207,25 @@ With OTLP logs and metrics flowing into your collector, you can route them to Gr
 For deployment details, see `docs/observability.md`.
 
 ## 🔧 Queue Workers
+
+Each worker supports configurable in-process concurrency via environment variables:
+
+- `YUZU_PROVISION_CONCURRENCY` for provision jobs
+- `YUZU_DEPROVISION_CONCURRENCY` for deprovision jobs
+- `YUZU_TOGGLE_STATUS_CONCURRENCY` for power-state jobs
+
+This lets one Yuzu instance process multiple jobs concurrently without increasing the number of pods, while still keeping separate limits per queue type.
+
+Yuzu also uses Redis-backed resource locks to prevent conflicting jobs from operating on the same resource at the same time:
+
+- per-`instanceId` locks across all queue types
+- per-`vmid` locks for operations targeting the same VM
+
+The lock behavior can be tuned with:
+
+- `YUZU_RESOURCE_LOCK_TTL_MILLIS`
+- `YUZU_RESOURCE_LOCK_ACQUIRE_TIMEOUT_MILLIS`
+- `YUZU_RESOURCE_LOCK_RETRY_INTERVAL_MILLIS`
 
 ### Provision Worker
 Handles VM creation from templates:
