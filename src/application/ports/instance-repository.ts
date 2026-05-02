@@ -94,7 +94,6 @@ export interface InstanceRepository {
 	updateToggleStatuses(input: {
 		instanceId: number;
 		pveVmId: number;
-		instanceStatus: "ACTIVE" | "INACTIVE";
 		vmStatus: "RUNNING" | "STOPPED";
 	}): Promise<void>;
 }

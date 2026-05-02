@@ -82,7 +82,6 @@ export class ToggleInstanceStatusUseCase {
 						await this.repository.updateToggleStatuses({
 							instanceId,
 							pveVmId: pveVm.id,
-							instanceStatus,
 							vmStatus,
 						});
 					},

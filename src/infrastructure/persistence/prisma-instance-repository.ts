@@ -196,17 +196,12 @@ export class PrismaInstanceRepository implements InstanceRepository {
 	async updateToggleStatuses(input: {
 		instanceId: number;
 		pveVmId: number;
-		instanceStatus: "ACTIVE" | "INACTIVE";
 		vmStatus: "RUNNING" | "STOPPED";
 	}): Promise<void> {
 		await this.prisma.$transaction([
 			this.prisma.pVEVM.update({
 				where: { id: input.pveVmId },
 				data: { status: input.vmStatus },
-			}),
-			this.prisma.instance.update({
-				where: { id: input.instanceId },
-				data: { status: input.instanceStatus },
 			}),
 		]);
 	}
