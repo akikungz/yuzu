@@ -55,7 +55,10 @@ export class ToggleStatusQueueWorker {
 
 				jobLogger.info({ data: job.data }, "Processing toggle status job");
 
-				if (job.name !== "toggle-status") {
+				// Accept either the canonical "toggle-status" job name or any
+				// legacy/variant that begins with "toggle" (e.g. "toggle", "toggle-start-11").
+				// Some enqueuers set the job id/name differently; be lenient to avoid rejecting jobs.
+				if (!(job.name === "toggle-status" || job.name === "toggle" || job.name?.startsWith("toggle"))) {
 					throw new Error(`Unknown job type: ${job.name}`);
 				}
 
